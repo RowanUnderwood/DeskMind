@@ -1,0 +1,12 @@
+# DOS files keep CR LF on every checkout (the Tandy side needs them)
+*.bat      text eol=crlf
+*.BAT      text eol=crlf
+*.TXT      text eol=crlf
+*.CFG      text eol=crlf
+*.SYS      text eol=crlf
+# Run inside WSL: LF only
+*.sh       text eol=lf
+# Binary
+*.png      binary
+*.jpg      binary
+*.img      binary

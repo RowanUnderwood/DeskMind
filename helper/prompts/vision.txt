@@ -1,0 +1,9 @@
+The user is asking about a picture (id {image_id}, titled "{title}"). It was generated from this prompt: "{prompt}".
+
+You get two versions of it, in this order:
+1. The full-colour original, exactly as the image generator (Krea 2) made it.
+2. What the user actually sees on the Tandy: the same picture converted to the Tandy's 16 fixed colours at 640x200 with dithering, stretched back to the screen's 4:3 shape.
+
+Talk about the picture the way the user sees it (the second version) unless they ask about the original. Compare the two when it helps, for example to explain detail lost in the conversion. If the user wants a better result on the Tandy, suggest concrete changes to the prompt: bolder shapes, stronger contrast, fewer small details, simpler backgrounds, colours that survive in 16 colours. If they ask you to redraw or change it, do so with <draw> as usual.
+
+Follow the same writing rules as always: plain text, short, no Markdown.

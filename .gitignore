@@ -1,0 +1,35 @@
+# Toolchains and downloads (see README, "Building from source")
+tools/ow2/
+tools/mtcp/
+tools/dl/
+tools/didder/
+tools/*.log
+
+# Build output
+dos/obj/
+dos/out/
+
+# Python
+helper/.venv/
+__pycache__/
+*.pyc
+
+# Local data and settings: pictures, chats, dither output, API token, local paths
+helper/data/
+helper/out/
+helper/settings.json
+helper/settings.json.tmp
+
+# 86Box VM: disk image, NVRAM, screenshots, test data, third-party packet drivers
+vm/dm_test.img
+vm/dm_sl2/nvr/
+vm/shots/
+vm/files/DMTEST/PICS/
+vm/files/DMTEST/CHATS/
+vm/files/DMTEST/*.COM
+
+# Photos of the Tandy screen, the original ComfyUI workflows, DOSBox logs
+screenshotsfromtandy/
+krea2_native*.json
+stdout.txt
+stderr.txt

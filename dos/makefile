@@ -1,0 +1,58 @@
+# DeskMind DOS build (Open Watcom wmake).  Run through build.bat, which
+# starts wmake inside dos\obj so all paths here are relative to obj\.
+
+MTCP = ..\..\tools\mtcp\mTCP-src_2025-01-10
+OUT  = ..\out
+
+# Same code-generation options as mTCP's own apps (-zp2 must match the
+# library).  -0 = 8086 code, so the EXEs also run on 86Box's Tandy SL/2.
+CFLAGS = -zq -bt=dos -ml -0 -s -oh -ok -ot -oa -ei -zp2 -zpw -ob -ol+ -oi+ &
+         -DCFG_H="dmtcp.cfg" -i=..\src -i=$(MTCP)\TCPINC -i=$(MTCP)\INCLUDE
+
+TCPOBJS = packet.obj arp.obj eth.obj ip.obj tcp.obj tcpsockm.obj udp.obj &
+          utils.obj dns.obj timer.obj ipasm.obj trace.obj
+LIBOBJS = video.obj mouse.obj sound.obj sys.obj gui.obj cfg.obj tpi.obj slide.obj
+APPOBJS = app.obj scr_chat.obj scr_create.obj scr_gallery.obj deskmind.obj
+
+# Header changes: .AUTODEPEND once missed a struct change in gui.h (stale guitest.obj,
+# garbage on screen), and listing headers as object dependencies stopped wmake from
+# noticing .cpp changes.  So: any header newer than hdrs.chk deletes all objects.
+HDRS = ..\src\video.h ..\src\mouse.h ..\src\sound.h ..\src\sys.h ..\src\gui.h &
+       ..\src\cfg.h ..\src\tpi.h ..\src\net.h ..\src\app.h ..\src\scr.h ..\src\slide.h ..\src\dmtcp.cfg
+
+LINK = wlink system dos option quiet option map option eliminate option stack=8192
+
+.cpp: ..\src;..\spike;$(MTCP)\TCPLIB
+.asm: $(MTCP)\TCPLIB
+
+all: hdrs.chk $(OUT)\DESKMIND.EXE $(OUT)\SLIDES.EXE $(OUT)\GUITEST.EXE $(OUT)\V640.EXE $(OUT)\NETTEST.EXE .SYMBOLIC
+
+hdrs.chk: $(HDRS)
+  @if exist *.obj del *.obj
+  @echo headers changed: full rebuild > hdrs.chk
+
+$(OUT)\DESKMIND.EXE: $(TCPOBJS) net.obj $(LIBOBJS) $(APPOBJS)
+  $(LINK) name $@ file { $< }
+
+$(OUT)\SLIDES.EXE: video.obj mouse.obj sys.obj cfg.obj tpi.obj slide.obj slides.obj
+  $(LINK) name $@ file { $< }
+
+$(OUT)\GUITEST.EXE: $(TCPOBJS) net.obj $(LIBOBJS) guitest.obj
+  $(LINK) name $@ file { $< }
+
+$(OUT)\V640.EXE: video.obj mouse.obj sound.obj v640.obj
+  $(LINK) name $@ file { $< }
+
+$(OUT)\NETTEST.EXE: $(TCPOBJS) net.obj nettest.obj
+  $(LINK) name $@ file { $< }
+
+.cpp.obj: .AUTODEPEND
+  wpp $[@ $(CFLAGS)
+
+.asm.obj:
+  wasm -zq -0 -ml $[@
+
+clean: .SYMBOLIC
+  @if exist *.obj del *.obj
+  @if exist *.map del *.map
+  @if exist *.err del *.err
