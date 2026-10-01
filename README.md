@@ -1,5 +1,9 @@
 # DeskMind + MindServer
 
+![A Krea 2 picture ("Dungeon Wraiths" box art) dithered by MindServer to the Tandy's 16 colours at 640x200, shown at the real 4:3 screen shape](docs/dungeon-wraiths.png)
+
+*A Krea 2 picture as DeskMind shows it: dithered to 16 colours at 640x200, stretched here to the 4:3 shape of the Tandy's screen.*
+
 AI chat and AI pictures on a **Tandy 1000 TL/3** (10 MHz 286, 640K, Tandy Video II), in 640x200 with 16 colours.
 
 - **DeskMind** (`C:\DESKMIND\DESKMIND.EXE` on the Tandy) is a DeskMate-style DOS program. You chat with the Qwen AI,
