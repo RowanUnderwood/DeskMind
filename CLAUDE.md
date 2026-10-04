@@ -207,6 +207,15 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   `gallery_rescan()` (Create does), so they appeared only after a Sync or restart. `scr_chat.cpp` now rescans when it
   downloaded any. Installed on the card (only `DESKMIND\DESKMIND.EXE` changed; backups `..._before/after-deskmind-chatgallery.img`);
   user confirmed on the real TL/3 (2026-10-04).
+- **Missing chat pictures (2026-10-04, chat DF21D117 / picture C7B1069D).** The server had the picture; the Tandy's download after the
+  reply failed and was ignored, leaving a grey thumbnail and "Could not show this picture". Cause of that one failure unknown (no log, possibly WiFi),
+  but `net.cpp` chose local ports with an **unseeded `rand()`**, so every run reused the same port sequence; now `next_port()` starts at
+  BIOS ticks ^ PIT and counts up. Failed downloads now add a chat notice; a missing picture's caption says "click to download" and
+  `app_view_pic()` downloads any missing picture before showing it (then `gallery_rescan()`). Qwen had also said "There you go" without a
+  `<draw>` (it could see the picture through `_recent_picture`); `system_chat.txt` now forbids claiming a picture without a draw and
+  says to click to re-download (replayed on test copies 3/3 honest). Old prompt: `helper\out\system_chat.txt.bak-20261004b`.
+  Installed on the card (only `DESKMIND\DESKMIND.EXE` changed; backups `..._before/after-deskmind-picretry.img`); user confirmed on the real TL/3 (2026-10-04).
+  `card_install.ps1 -Files` needs **absolute** paths (a relative one fails in WSL as `/mnt/./...`).
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.

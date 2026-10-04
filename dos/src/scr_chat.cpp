@@ -243,7 +243,7 @@ static void draw_row( int r ) {
       if ( m.kind == MK_PIC ) { unsigned n = m.len < 50 ? m.len : 50; _fmemcpy( cap, s_tx + m.off, n ); cap[n] = 0; }
       else strcpy( cap, "(attached picture)" );
     }
-    else if ( d.sub == 3 ) strcpy( cap, "click to view" );
+    else if ( d.sub == 3 ) strcpy( cap, px || app_have_pic( id ) ? "click to view" : "click to download" );
     unsigned char fg = d.sub == 3 ? DGRAY : BLACK;
     int k = 0;
     for ( c = cx; c < COLS; c++ ) vid_char( TEXT_X + c * 8, y + 1, (unsigned char)( cap[k] ? cap[k++] : ' ' ), fg, WHITE );
@@ -862,6 +862,13 @@ static void send_message( void ) {
       got++;
       for ( int t = 0; t < THUMBS; t++ ) if ( !strcmp( s_th[t].id, pending[k] ) ) s_th[t].id[0] = 0;
     }
+    else {
+      // Say so (it used to fail silently, leaving a grey box); a click on it tries again
+      static char t[160];
+      sprintf( t, "Could not download the picture: %s.  Click it to try again.", net_error( ) );
+      add_msg( MK_ERR, t, 0 );
+      snd_play( SND_ERROR );
+    }
   }
   if ( got ) gallery_rescan( );      // the Gallery lists PICS only when told to, as after Create
   if ( npending ) {
@@ -943,7 +950,11 @@ int chat_event( Event *e ) {
     int r = ( e->y - PY - 2 ) / ROW_H, i = s_top + r;
     if ( i >= 0 && i < s_ndl && s_dl[i].type == DL_PIC ) {
       Msg &m = s_msgs[ s_dl[i].msg ];
-      if ( m.pic[0] ) app_view_pic( m.pic );
+      if ( m.pic[0] ) {
+        int had = app_have_pic( m.pic );
+        app_view_pic( m.pic );
+        if ( !had && app_have_pic( m.pic ) ) chat_draw( );   // now with its thumbnail
+      }
     }
     return CMD_NONE;
   }

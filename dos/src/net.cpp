@@ -6,6 +6,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <bios.h>
+#include <conio.h>
+#include <dos.h>
 
 #include "types.h"
 #include "timer.h"
@@ -45,6 +47,22 @@ static void __interrupt __far break_handler( void ) { s_break = 1; }
 static void set_err( const char *msg ) {
   strncpy( s_err, msg, sizeof( s_err ) - 1 );
   s_err[ sizeof( s_err ) - 1 ] = 0;
+}
+
+// Local port for each new connection.  It starts at a random point (BIOS ticks plus the
+// PIT counter) and counts up, so no port repeats within a run and runs don't repeat each
+// other.  rand() was never seeded, so every run used the same ports in the same order,
+// and a restart could reuse a port the PC still held from a closed connection.
+static uint16_t next_port( void ) {
+  static uint16_t port = 0;
+  if ( !port ) {
+    outp( 0x43, 0 );
+    unsigned pit = inp( 0x40 ); pit |= inp( 0x40 ) << 8;
+    unsigned tick = *(unsigned far *)MK_FP( 0x40, 0x6C );
+    port = 2048 + (uint16_t)( ( tick ^ pit ) % 30000u );
+  }
+  if ( ++port >= 32048u ) port = 2048;
+  return port;
 }
 
 const char *net_error( void ) { return s_err; }
@@ -153,7 +171,7 @@ int http_open( const char *host, unsigned port, const char *method, const char *
     return NET_ERROR;
   }
 
-  uint16_t localPort = 2048 + ( rand( ) % 30000 );
+  uint16_t localPort = next_port( );
   if ( s_sock->connectNonBlocking( localPort, addr, port ) ) {
     set_err( "Connect failed" );
     TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
@@ -349,7 +367,7 @@ int http_post_file( const char *host, unsigned port, const char *path, const cha
   if ( s_sock ) http_close( );
   s_sock = TcpSocketMgr::getSocket( );
   if ( !s_sock || s_sock->setRecvBuffer( RECV_BUFFER ) ) { fclose( f ); set_err( "No free socket" ); return NET_ERROR; }
-  uint16_t localPort = 2048 + ( rand( ) % 30000 );
+  uint16_t localPort = next_port( );
   if ( s_sock->connectNonBlocking( localPort, addr, port ) ) { fclose( f ); http_close( ); set_err( "Connect failed" ); return NET_ERROR; }
   clockTicks_t start = TIMER_GET_CURRENT( );
   while ( !s_sock->isConnectComplete( ) ) {

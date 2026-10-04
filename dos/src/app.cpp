@@ -16,6 +16,7 @@
 #include "tpi.h"
 #include "net.h"
 #include "slide.h"
+#include "scr.h"
 
 char app_dir[80] = "";
 int  app_net = 0;
@@ -99,6 +100,21 @@ int app_upload_pic( const char *id ) {
 int app_view_pic( const char *id ) {
   char p[80];
   app_pic_path( p, id );
+  // A picture announced in a chat whose download failed: fetch it now
+  if ( !app_have_pic( id ) ) {
+    char t[160];
+    if ( !app_net ) {
+      msg_box( "Picture", "This picture is not on the Tandy yet. Restart with W (WiFi) to download it.", "OK" );
+      return 1;
+    }
+    app_status( "Downloading the picture..." );
+    if ( app_download_pic( id ) ) {
+      sprintf( t, "Could not download this picture: %s", net_error( ) );
+      msg_box( "Picture", t, "OK" );
+      return 1;
+    }
+    gallery_rescan( );
+  }
   gui_mouse_hide( );
   int rc = tpi_show( p );
   if ( rc ) {
