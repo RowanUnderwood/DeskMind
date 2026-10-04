@@ -133,6 +133,8 @@ static void draw_page_info( int page ) {
   gui_mouse_hide( );
   vid_fill( GX0 - 4, GY0 + GROWS * CH, 400, 10, LGRAY );
   vid_text( GX0, GY0 + GROWS * CH, t, DGRAY, -1 );
+  // In a white sunken frame like Chat's and the lists' (on the grey window the track was invisible)
+  ui_sunken( SBX - 2, SBY - 1, 14, SBH + 2, WHITE );
   ui_scrollbar( SBX, SBY, SBH, pages, 1, page );
   gui_mouse_show( );
 }

@@ -225,6 +225,15 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   only got the click-above/below fix (its view follows the cursor). New `vid_scroll_down` makes upward chat scrolls
   of less than a page cheap. 86Box (keys only) checked grid bar + chat line scroll; **dragging confirmed on the
   real TL/3 (2026-10-04)** (86Box mouse can't be scripted). CuteMouse 1.9.1 has no wheel; 2.x would be needed for wheel scrolling.
+- **Fake "[You drew picture ...]" replies (2026-10-04, chat F483488D).** `_history` used to append
+  `[You drew picture ID: prompt]` to Qwen's own past messages; Qwen sometimes copied that line (with an invented ID)
+  instead of writing `<draw>`, so nothing was drawn. History now shows past drawings as `<draw>PROMPT</draw>` (prompt
+  from the chat, else the picture's metadata, since Tandy-synced transcripts keep only titles) and strips old bracket
+  lines from saved text. `DrawSplitter` also accepts the bracket form as a draw request (safety net, ID dropped).
+  Prompt: "click to download" only if the earlier reply really drew it, otherwise draw it now (old prompt
+  `helper\out\system_chat.txt.bak-20261004c`). Replay of the failing turn: 3/3 real drawings; smoke test 10/10.
+  Tests in `tests/test_core.py` (`test_old_draw_note`, `test_history`). Gallery grid bar got a white sunken frame
+  (on the grey window its track was invisible); card backups `..._before/after-deskmind-gallerybar.img`; user confirmed both on the real TL/3 (2026-10-04).
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.

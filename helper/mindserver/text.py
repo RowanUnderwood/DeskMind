@@ -149,48 +149,56 @@ class Coalescer:
 
 
 class DrawSplitter:
-    """Separates '<draw>...</draw>' from visible text in a stream."""
+    """Separates '<draw>...</draw>' from visible text in a stream.
 
-    OPEN, CLOSE = "<draw>", "</draw>"
+    Also accepts '[You drew picture <ID>: ...]': the form the chat history used to use for past drawings,
+    which Qwen sometimes copied instead of writing a <draw> tag (nothing got drawn, and the line showed as
+    text). It is treated as a draw request with the ID dropped."""
+
+    PAIRS = (("<draw>", "</draw>"), ("[you drew picture ", "]"))   # openers lower case: matching ignores case
+    ID_PREFIX = re.compile(r"^\s*[0-9A-Za-z]{1,12}\s*:\s*")
 
     def __init__(self):
         self.buf = ""
-        self.inside = False
+        self.inside = None              # the closer we are waiting for, or None
         self.prompts: list[str] = []
         self.current = ""
+
+    def _add(self, prompt: str, pair: int) -> None:
+        if pair == 1:
+            prompt = self.ID_PREFIX.sub("", prompt, count=1)
+        prompt = " ".join(prompt.split())
+        if prompt:
+            self.prompts.append(prompt)
 
     def feed(self, piece: str) -> str:
         """Returns the visible text from this piece (tag contents are collected)."""
         self.buf += piece
         visible = ""
         while True:
-            if not self.inside:
-                i = self.buf.lower().find(self.OPEN)
-                if i >= 0:
+            low = self.buf.lower()
+            if self.inside is None:
+                hits = [(low.find(o), k) for k, (o, _) in enumerate(self.PAIRS) if low.find(o) >= 0]
+                if hits:
+                    i, k = min(hits)
                     visible += self.buf[:i]
-                    self.buf = self.buf[i + len(self.OPEN):]
-                    self.inside = True
+                    self.buf = self.buf[i + len(self.PAIRS[k][0]):]
+                    self.inside, self.pair = self.PAIRS[k][1], k
                     continue
-                # keep a possible partial "<draw" at the end
-                keep = 0
-                for n in range(1, len(self.OPEN)):
-                    if self.buf.lower().endswith(self.OPEN[:n]):
-                        keep = n
+                # keep a possible partial opener ("<dra", "[You dr") at the end
+                keep = max([n for o, _ in self.PAIRS for n in range(1, len(o)) if low.endswith(o[:n])] or [0])
                 visible += self.buf[:len(self.buf) - keep]
                 self.buf = self.buf[len(self.buf) - keep:]
                 return visible
-            i = self.buf.lower().find(self.CLOSE)
+            i = low.find(self.inside)
             if i >= 0:
                 self.current += self.buf[:i]
-                self.prompts.append(" ".join(self.current.split()))
+                self._add(self.current, self.pair)
                 self.current = ""
-                self.buf = self.buf[i + len(self.CLOSE):]
-                self.inside = False
+                self.buf = self.buf[i + len(self.inside):]
+                self.inside = None
                 continue
-            keep = 0
-            for n in range(1, len(self.CLOSE)):
-                if self.buf.lower().endswith(self.CLOSE[:n]):
-                    keep = n
+            keep = max([n for n in range(1, len(self.inside)) if low.endswith(self.inside[:n])] or [0])
             self.current += self.buf[:len(self.buf) - keep]
             self.buf = self.buf[len(self.buf) - keep:]
             return visible
@@ -198,9 +206,9 @@ class DrawSplitter:
     def finish(self) -> str:
         """End of stream: an unclosed tag still counts as a prompt."""
         rest = ""
-        if self.inside and (self.current + self.buf).strip():
-            self.prompts.append(" ".join((self.current + self.buf).split()))
-        elif not self.inside:
+        if self.inside is not None and (self.current + self.buf).strip():
+            self._add(self.current + self.buf, self.pair)
+        elif self.inside is None:
             rest = self.buf
-        self.buf, self.current, self.inside = "", "", False
+        self.buf, self.current, self.inside = "", "", None
         return rest

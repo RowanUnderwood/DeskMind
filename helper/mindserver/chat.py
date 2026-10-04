@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -36,6 +37,7 @@ CHAT_DIR = os.path.join(DATA_DIR, "chats")
 PROMPT_DIR = os.path.join(HELPER_DIR, "prompts")
 PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "vision.txt"}
 HISTORY_CHARS = 24000          # how much earlier conversation is sent along
+OLD_DRAW_NOTE = re.compile(r"\[You drew picture [0-9A-Za-z]{1,12}:[^\]]*\]", re.IGNORECASE)
 
 
 def load_prompt(name: str) -> str:
@@ -159,14 +161,28 @@ class ChatEngine:
     def _system(self) -> str:
         return load_prompt("chat").replace("{date}", datetime.now().strftime("%A %d %B %Y"))
 
+    def _drawn_prompt(self, d: dict) -> str:
+        """What was drawn: the saved prompt, else the picture's own (chats synced from the Tandy keep only
+        the title), else the title."""
+        if d.get("prompt"):
+            return d["prompt"]
+        if self.store.exists(d["id"]):
+            p = self.store.meta(d["id"]).get("prompt")
+            if p:
+                return p
+        return d.get("title", "")
+
     def _history(self, chat: dict) -> list[dict]:
-        """Earlier messages, newest kept first until the character budget runs out."""
+        """Earlier messages, newest kept first until the character budget runs out.
+
+        A past drawing appears as the <draw> tag Qwen wrote, the form it must use again. (A note like
+        "[You drew picture ID: ...]" used to be added instead, and Qwen sometimes copied the note rather
+        than drawing; such lines saved in old replies are left out.)"""
         out, used = [], 0
         for m in reversed(chat["messages"]):
-            t = m.get("text", "")
+            t = OLD_DRAW_NOTE.sub("", m.get("text", "")).strip()
             if m.get("drawn"):
-                t += "\n" + "\n".join(f"[You drew picture {d['id']}: {d.get('prompt', d.get('title', ''))}]"
-                                      for d in m["drawn"])
+                t += "\n" + "\n".join(f"<draw>{self._drawn_prompt(d)}</draw>" for d in m["drawn"])
             if m.get("image"):
                 t = f"[Attached picture {m['image']}]\n" + t
             used += len(t)

@@ -94,6 +94,47 @@ def test_text_stream():
     print("text stream ok:", repr(text))
 
 
+def test_old_draw_note():
+    # Qwen once copied the old history note instead of writing <draw>: it must still draw, and not show
+    reply = ("Let's go back to painterly:\n[You drew picture A4B2C3D1: A plump old witch, warm candle light]"
+             " Enjoy! [not a picture] <DRAW>second</draw>")
+    for size in (1, 2, 3, 5, 7, 64):
+        pieces = [reply[i:i + size] for i in range(0, len(reply), size)]
+        text, prompts, _ = _stream(pieces)
+        assert prompts == ["A plump old witch, warm candle light", "second"], (size, prompts)
+        assert "You drew" not in text and "A4B2" not in text, (size, text)
+        assert "Let's go back to painterly:" in text and "Enjoy! [not a picture]" in text, (size, text)
+    text, prompts, _ = _stream(["Here: [You drew picture 1234ABCD: unclosed at the end"])
+    assert prompts == ["unclosed at the end"] and "You drew" not in text, (prompts, text)
+    print("old draw note ok")
+
+
+def test_history():
+    from mindserver.chat import ChatEngine
+
+    class FakeStore:
+        def exists(self, i):
+            return i == "AABBCCDD"
+
+        def meta(self, i):
+            return {"prompt": "the stored prompt"}
+
+    eng = ChatEngine.__new__(ChatEngine)              # only _history and its helpers are used
+    eng.store = FakeStore()
+    chat = {"messages": [
+        {"role": "user", "text": "draw a cat"},
+        {"role": "assistant", "text": "Here!", "drawn": [{"id": "AABBCCDD", "title": "A cat"}]},
+        {"role": "user", "text": "again"},
+        {"role": "assistant", "text": "Sure:\n[You drew picture A4B2C3D1: a fake one]", "drawn": []},
+        {"role": "assistant", "text": "Done", "drawn": [{"id": "11111111", "title": "T", "prompt": "saved"}]}]}
+    h = eng._history(chat)
+    assert h[1]["content"] == "Here!\n<draw>the stored prompt</draw>", h[1]
+    assert h[3]["content"] == "Sure:", h[3]
+    assert h[4]["content"] == "Done\n<draw>saved</draw>", h[4]
+    assert not any("You drew" in m["content"] for m in h)
+    print("history ok")
+
+
 def test_transcript():
     from mindserver.chat import ChatStore
     chat = {"id": "0A0B0C0D", "title": "t", "created": "2026-09-29T10:00:00", "updated": "2026-09-29T10:00:00",
@@ -116,5 +157,7 @@ if __name__ == "__main__":
     test_title()
     test_screen_shot()
     test_text_stream()
+    test_old_draw_note()
+    test_history()
     test_transcript()
     print("ALL OK")
