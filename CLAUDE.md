@@ -203,6 +203,10 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   The TL/3 is from **February 1991** (Tech Monitor, 19 Feb 1991), not 1989 as the prompts said; `enhance.txt` fixed too.
   Old prompts: `helper\out\*.txt.bak-20261004`. Smoke test gained "tandy facts" (640 / 1991 / 720, no laptop) and
   "no spec recital" (Paris answer without specs): 10/10 on thinkingcap.
+- **Chat pictures in the Gallery (2026-10-04).** Chat downloaded drawn pictures into PICS after the reply but never called
+  `gallery_rescan()` (Create does), so they appeared only after a Sync or restart. `scr_chat.cpp` now rescans when it
+  downloaded any. Installed on the card (only `DESKMIND\DESKMIND.EXE` changed; backups `..._before/after-deskmind-chatgallery.img`);
+  user confirmed on the real TL/3 (2026-10-04).
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.

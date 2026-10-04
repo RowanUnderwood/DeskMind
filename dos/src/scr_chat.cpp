@@ -854,13 +854,16 @@ static void send_message( void ) {
   net_timeout_ms = saveTimeout;
 
   // Now that the reply's connection is closed, fetch the pictures it announced
+  int got = 0;
   for ( int k = 0; k < npending; k++ ) {
     if ( app_have_pic( pending[k] ) ) continue;
     app_status( "Downloading the picture..." );
     if ( app_download_pic( pending[k] ) == 0 ) {
+      got++;
       for ( int t = 0; t < THUMBS; t++ ) if ( !strcmp( s_th[t].id, pending[k] ) ) s_th[t].id[0] = 0;
     }
   }
+  if ( got ) gallery_rescan( );      // the Gallery lists PICS only when told to, as after Create
   if ( npending ) {
     draw_panel( );
     snd_play( SND_IMAGE );
