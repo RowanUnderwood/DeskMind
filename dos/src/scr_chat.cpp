@@ -260,17 +260,8 @@ static int s_sbN = -1, s_sbTop = -1;
 static void draw_scroll( int force ) {
   if ( !force && s_sbN == s_ndl && s_sbTop == s_top ) return;
   s_sbN = s_ndl; s_sbTop = s_top;
-  int x = PX + PW - 12, y = PY + 1, h = PH - 2;
   gui_mouse_hide( );
-  vid_fill( x, y, 10, h, LGRAY );
-  vid_fill( x, y, 2, h, DGRAY );
-  if ( s_ndl > ROWS ) {
-    int th = h * ROWS / s_ndl;
-    if ( th < 6 ) th = 6;
-    int ty = y + (int)( (long)( h - th ) * s_top / ( s_ndl - ROWS ) );   // long: 124 * 550 overflows an int
-    vid_fill( x + 2, ty, 8, th, DGRAY );
-    ui_bevel( x + 2, ty, 8, th, 1 );
-  }
+  ui_scrollbar( PX + PW - 12, PY + 1, PH - 2, s_ndl, ROWS, s_top );
   gui_mouse_show( );
 }
 
@@ -278,6 +269,9 @@ static void draw_panel( void ) {
   for ( int r = 0; r < ROWS; r++ ) draw_row( r );
   draw_scroll( 1 );
 }
+
+static void set_top( int top );
+static void chat_scrolled( void *, int top, int ) { set_top( top ); }
 
 static void set_top( int top ) {
   if ( top > max_top( ) ) top = max_top( );
@@ -290,6 +284,12 @@ static void set_top( int top ) {
     vid_scroll_up( PX + 2, PY + 2, PW - 16, ROWS * ROW_H, d * ROW_H, WHITE );
     gui_mouse_show( );
     for ( int r = ROWS - d; r < ROWS; r++ ) draw_row( r );
+  }
+  else if ( d < 0 && -d < ROWS ) {
+    gui_mouse_hide( );
+    vid_scroll_down( PX + 2, PY + 2, PW - 16, ROWS * ROW_H, -d * ROW_H, WHITE );
+    gui_mouse_show( );
+    for ( int r = 0; r < -d; r++ ) draw_row( r );
   }
   else draw_panel( );
   draw_scroll( 0 );
@@ -944,7 +944,7 @@ int chat_event( Event *e ) {
   }
   if ( e->type == EV_DOWN && ui_hit( e->x, e->y, PX, PY, PW, PH ) ) {
     if ( e->x >= PX + PW - 12 ) {                   // scroll bar
-      set_top( e->y < PY + PH / 2 ? s_top - ( ROWS - 1 ) : s_top + ( ROWS - 1 ) );
+      sb_track( PX + PW - 12, PY + 1, PH - 2, s_ndl, ROWS, s_top, ROWS - 1, e->x, e->y, chat_scrolled, 0 );
       return CMD_NONE;
     }
     int r = ( e->y - PY - 2 ) / ROW_H, i = s_top + r;

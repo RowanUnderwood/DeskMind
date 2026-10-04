@@ -53,6 +53,7 @@ int  vid_text_n( int x, int y, const char far *s, int n, unsigned char fg, int b
 
 // Move a byte-aligned region (x, w even) up by n lines and fill the gap
 void vid_scroll_up( int x, int y, int w, int h, int n, unsigned char fill );
+void vid_scroll_down( int x, int y, int w, int h, int n, unsigned char fill );
 
 // Whole-screen copy from a buffer in the native layout (vid_pitch * vid_h bytes)
 void vid_blit_full( const unsigned char far *src );

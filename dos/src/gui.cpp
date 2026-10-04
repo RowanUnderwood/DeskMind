@@ -254,15 +254,73 @@ static int focusable( Widget &w ) {
   return w.type != W_LABEL && !( w.flags & ( WF_HIDDEN | WF_DISABLED ) );
 }
 
-static void draw_scrollbar( int x, int y, int h, int total, int visible, int top ) {
+void sb_thumb( int h, int total, int visible, int top, int *ty, int *th ) {
+  // long math throughout: 130 * 500 overflows an int (the 0.7.1 bug)
+  int t = total > visible ? (int)( (long)h * visible / total ) : h;
+  if ( t < 6 ) t = 6;
+  if ( t > h ) t = h;
+  *th = t;
+  *ty = total > visible ? (int)( (long)( h - t ) * top / ( total - visible ) ) : 0;
+}
+
+void ui_scrollbar( int x, int y, int h, int total, int visible, int top ) {
   vid_fill( x, y, 10, h, LGRAY );
   vid_fill( x, y, 2, h, DGRAY );
   if ( total <= visible ) return;
-  int th = h * visible / total;
-  if ( th < 6 ) th = 6;
-  int ty = y + (int)( (long)( h - th ) * top / ( total - visible ) );   // long: 130 * 500 overflows an int
-  vid_fill( x + 2, ty, 8, th, DGRAY );
-  ui_bevel( x + 2, ty, 8, th, 1 );
+  int ty, th;
+  sb_thumb( h, total, visible, top, &ty, &th );
+  vid_fill( x + 2, y + ty, 8, th, DGRAY );
+  ui_bevel( x + 2, y + ty, 8, th, 1 );
+}
+
+static int sb_clamp( int top, int total, int visible ) {
+  if ( top > total - visible ) top = total - visible;
+  if ( top < 0 ) top = 0;
+  return top;
+}
+
+void sb_track( int x, int y, int h, int total, int visible, int top, int page,
+               int mx, int my, sb_apply_fn apply, void *ctx ) {
+  (void)x; (void)mx;
+  if ( total <= visible ) return;
+  int ty, th;
+  sb_thumb( h, total, visible, top, &ty, &th );
+  Event e;
+  if ( my >= y + ty && my < y + ty + th ) {
+    // Drag the box.  Each redraw finishes before the next poll, which then reads where the
+    // pointer is now, so a slow redraw skips positions instead of falling behind.
+    int grab = my - ( y + ty ), span = h - th, pending = 0;
+    unsigned long moved = ticks( );
+    for ( ;; ) {
+      gui_poll( &e );
+      if ( e.type == EV_UP ) break;
+      if ( e.type == EV_MOVE && span > 0 ) {
+        long off = (long)( e.y - grab - y );
+        int t = sb_clamp( (int)( ( off * ( total - visible ) + span / 2 ) / span ), total, visible );
+        if ( t != top ) { top = t; apply( ctx, top, 1 ); pending = 1; }
+        moved = ticks( );
+      }
+      else if ( pending && ticks( ) - moved >= 2 ) { apply( ctx, top, 0 ); pending = 0; }   // the pointer paused
+    }
+    if ( pending ) apply( ctx, top, 0 );
+    return;
+  }
+  // Above or below the box: a page now, then repeat while held until the box reaches the pointer
+  int dir = my < y + ty ? -1 : 1;
+  unsigned long start = ticks( ), last = start;
+  int py = my;
+  for ( int first = 1;; first = 0 ) {
+    if ( first || ( ticks( ) - start >= 6 && ticks( ) != last ) ) {
+      last = ticks( );
+      sb_thumb( h, total, visible, top, &ty, &th );
+      int reached = dir < 0 ? py >= y + ty : py < y + ty + th;
+      int t = sb_clamp( top + dir * page, total, visible );
+      if ( !reached && t != top ) { top = t; apply( ctx, top, 0 ); }
+    }
+    gui_poll( &e );
+    if ( e.type == EV_UP ) break;
+    py = e.y;
+  }
 }
 
 static int s_full = 0;         // 1 = draw widgets from scratch (form_draw), 0 = update in place
@@ -295,7 +353,7 @@ static void draw_edit( Widget &w, int cx, int cy, int focused ) {
 
 static void draw_scrollbar_if( Widget &w, int x, int y, int h, int total, int visible, int top ) {
   if ( !s_full && w.sbn == total && w.sbtop == top ) return;
-  draw_scrollbar( x, y, h, total, visible, top );
+  ui_scrollbar( x, y, h, total, visible, top );
   w.sbn = total; w.sbtop = top;
 }
 
@@ -356,9 +414,12 @@ static void draw_list( Widget &w, int cx, int cy, int focused ) {
   int rows = list_rows( w );
   if ( w.sel >= w.count ) w.sel = w.count - 1;
   if ( w.sel < 0 && w.count ) w.sel = 0;
-  if ( w.sel >= 0 && w.sel < w.ltop ) w.ltop = w.sel;
-  if ( w.sel >= w.ltop + rows ) w.ltop = w.sel - rows + 1;
+  if ( !( w.flags & WF_FREEVIEW ) ) {
+    if ( w.sel >= 0 && w.sel < w.ltop ) w.ltop = w.sel;
+    if ( w.sel >= w.ltop + rows ) w.ltop = w.sel - rows + 1;
+  }
   if ( w.ltop > w.count - rows ) w.ltop = w.count - rows > 0 ? w.count - rows : 0;
+  if ( w.ltop < 0 ) w.ltop = 0;
   int iw = w.w - 18;
   int cols = ( iw - 2 ) / 8;
   for ( int r = 0; r < rows; r++ ) {
@@ -422,6 +483,7 @@ void form_draw( Form *f ) {
 
 void list_set( Widget *w, int count, list_item_fn item, void *ctx ) {
   w->count = count; w->item = item; w->ctx = ctx;
+  w->flags &= ~WF_FREEVIEW;
   if ( w->sel >= count ) w->sel = count - 1;
   if ( w->sel < 0 && count ) w->sel = 0;
 }
@@ -515,12 +577,24 @@ static int list_handle( Widget &w, int k ) {
   else if ( k == K_HOME ) w.sel = 0;
   else if ( k == K_END ) w.sel = w.count - 1;
   else return 0;
+  w.flags &= ~WF_FREEVIEW;                 // keys bring the view back to the selection
   if ( w.sel >= w.count ) w.sel = w.count - 1;
   if ( w.sel < 0 ) w.sel = 0;
   return old != w.sel ? 1 : 1;
 }
 
 // ---------------------------------------------------------------- events
+
+// The list whose scroll bar is being tracked (sb_track's callback gets only the widget)
+static Form *s_sbForm = 0;
+static int s_sbIdx = 0;
+
+static void list_scrolled( void *ctx, int top, int ) {
+  Widget &w = *(Widget *)ctx;
+  w.ltop = top;
+  w.flags |= WF_FREEVIEW;                  // the highlight stays where it is
+  form_draw_widget( s_sbForm, s_sbIdx );
+}
 
 static int cancel_id( Form *f ) {
   for ( int i = 0; i < f->n; i++ )
@@ -637,7 +711,9 @@ int form_event( Form *f, Event *e ) {
         case W_MEMO: {
           if ( e->x >= cx + w.w - 12 ) {                        // scroll bar: page
             int rows = memo_rows( w );
-            memo_handle( w, e->y < cy + w.h / 2 ? K_PGUP : K_PGDN );
+            int n = wrap( w.buf, memo_cols( w ), s_starts, MAX_LINES ), ty, th;
+            sb_thumb( w.h - 2, n, rows, (int)w.top, &ty, &th );
+            memo_handle( w, e->y < cy + 1 + ty ? K_PGUP : K_PGDN );
             (void)rows;
             form_draw_widget( f, i );
             return 0;
@@ -654,8 +730,9 @@ int form_event( Form *f, Event *e ) {
         }
         case W_LIST: {
           if ( e->x >= cx + w.w - 12 ) {
-            list_handle( w, e->y < cy + w.h / 2 ? K_PGUP : K_PGDN );
-            form_draw_widget( f, i );
+            s_sbForm = f; s_sbIdx = i;
+            sb_track( cx + w.w - 12, cy + 1, w.h - 2, w.count, list_rows( w ), w.ltop, list_rows( w ) - 1,
+                      e->x, e->y, list_scrolled, &w );
             return 0;
           }
           int r = ( e->y - cy - 2 ) / ROW_H;
@@ -663,6 +740,7 @@ int form_event( Form *f, Event *e ) {
           if ( idx >= 0 && idx < w.count ) {
             int same = ( idx == w.sel );
             w.sel = idx;
+            w.flags &= ~WF_FREEVIEW;
             form_draw_widget( f, i );
             if ( dbl && same ) return w.id;
           }

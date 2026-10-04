@@ -305,6 +305,17 @@ unsigned char far *vid_line_ptr( int y ) {
   return (unsigned char far *)MK_FP( s_lineSeg, s_lineOff[ y ] );
 }
 
+void vid_scroll_down( int x, int y, int w, int h, int n, unsigned char fill ) {
+  // Byte-aligned region (x and w even); moves lines y.. down by n (bottom first), fills the top n lines
+  if ( n <= 0 || h <= 0 ) return;
+  if ( n >= h ) { vid_fill( x, y, w, h, fill ); return; }
+  unsigned bx = (unsigned)x >> 1, bytes = (unsigned)w >> 1;
+  for ( int r = h - 1; r >= n; r-- ) {
+    _fmemcpy( vid_line_ptr( y + r ) + bx, vid_line_ptr( y + r - n ) + bx, bytes );
+  }
+  vid_fill( x, y, w, n, fill );
+}
+
 void vid_scroll_up( int x, int y, int w, int h, int n, unsigned char fill ) {
   // Byte-aligned region (x and w even); moves lines y+n.. up to y.., fills the bottom n lines
   if ( n <= 0 || h <= 0 ) return;

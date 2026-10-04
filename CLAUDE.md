@@ -216,6 +216,15 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   says to click to re-download (replayed on test copies 3/3 honest). Old prompt: `helper\out\system_chat.txt.bak-20261004b`.
   Installed on the card (only `DESKMIND\DESKMIND.EXE` changed; backups `..._before/after-deskmind-picretry.img`); user confirmed on the real TL/3 (2026-10-04).
   `card_install.ps1 -Files` needs **absolute** paths (a relative one fails in WSL as `/mnt/./...`).
+- **Scroll bars (2026-10-04).** Shared code in `gui.cpp`: `sb_thumb` (box geometry, long math), `ui_scrollbar`, and
+  `sb_track` (press until release: drag the box, or page toward the click and repeat after 6 ticks until the box reaches
+  the pointer; callback `apply(ctx, top, dragging)`, with a final `dragging = 0` call after a pause or release).
+  Used by Chat, the list widget (Gallery list, chat picker, Chats dialog) and a new per-page bar on the Gallery grid
+  (x 622; it redraws its 6 disk thumbnails only when the pointer pauses or on release). Lists set `WF_FREEVIEW` when the
+  bar moves the view so `draw_list` stops pulling it back to the selection; keys/clicks/`list_set` clear it. The memo
+  only got the click-above/below fix (its view follows the cursor). New `vid_scroll_down` makes upward chat scrolls
+  of less than a page cheap. 86Box (keys only) checked grid bar + chat line scroll; **dragging confirmed on the
+  real TL/3 (2026-10-04)** (86Box mouse can't be scripted). CuteMouse 1.9.1 has no wheel; 2.x would be needed for wheel scrolling.
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.

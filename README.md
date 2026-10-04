@@ -81,12 +81,13 @@ Options: `DESKMIND /NONET` (start offline), `DESKMIND /NOMOUSE` (keyboard only).
 | **Tab / Shift+Tab** | Next or previous control |
 | **Enter** | The default (outlined) button |
 | **Esc** | Cancel a dialog, or stop a reply or drawing in progress |
+| **Scroll bars** (mouse) | Click above or below the box to move a page (hold to keep going), or drag the box |
 
 Everything also works with the mouse (CuteMouse must be loaded).
 
 ### Chat (F2)
 
-- Type and press **Enter** (or Send). The reply streams in. **PgUp/PgDn** and the arrow keys scroll.
+- Type and press **Enter** (or Send). The reply streams in. **PgUp/PgDn**, the arrow keys and the scroll bar scroll.
 - **Ask for a picture in plain words** ("draw a castle at sunset"). Qwen draws it, and the thumbnail appears in the chat.
   **Click a thumbnail** to see it full screen.
 - **Picture** attaches a gallery picture to your next message, so you can ask about it ("what's in this picture?"). Qwen sees both the
@@ -108,7 +109,7 @@ Everything also works with the mouse (CuteMouse must be loaded).
 
 ### Gallery (F4)
 
-- Grid of thumbnails (6 per page) or a list with dates (**List/Grid** button). Arrows, PgUp/PgDn, Home/End move. **Enter** or a
+- Grid of thumbnails (6 per page) or a list with dates (**List/Grid** button). Arrows, PgUp/PgDn, Home/End or the scroll bar move. **Enter** or a
   double-click views full screen.
 - **Rename** changes the title (the file keeps its 8-character ID name). **Delete** removes the picture from the Tandy only.
   **Everywhere** removes it from MindServer too.

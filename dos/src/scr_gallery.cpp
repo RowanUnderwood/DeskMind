@@ -38,6 +38,10 @@ char gallery_ask_id[9] = "";
 #define GCOLS 3
 #define GROWS 2
 #define PER_PAGE ( GCOLS * GROWS )
+// The grid's scroll bar, one step per page, right of the cells (they end at x 620)
+#define SBX   622
+#define SBY   ( GY0 - 3 )
+#define SBH   ( GROWS * CH - 2 )
 
 static Widget s_ws[8];
 static Form s_form;
@@ -118,17 +122,37 @@ static void draw_cell( int i, int sel ) {
   gui_mouse_show( );
 }
 
-static void draw_grid( void ) {
-  int page = s_sel / PER_PAGE;
-  for ( int k = 0; k < PER_PAGE; k++ ) draw_cell( page * PER_PAGE + k, page * PER_PAGE + k == s_sel );
+static int grid_pages( void ) { return ( s_n + PER_PAGE - 1 ) / PER_PAGE; }
+
+// The page counter and the scroll bar (cheap: drawn alone while the bar is dragged)
+static void draw_page_info( int page ) {
   char t[40];
-  int pages = ( s_n + PER_PAGE - 1 ) / PER_PAGE;
+  int pages = grid_pages( );
   if ( s_total > s_n ) sprintf( t, "Page %d of %d  (newest %d of %d)", pages ? page + 1 : 0, pages, s_n, s_total );
   else sprintf( t, "Page %d of %d  (%d pictures)", pages ? page + 1 : 0, pages, s_n );
   gui_mouse_hide( );
   vid_fill( GX0 - 4, GY0 + GROWS * CH, 400, 10, LGRAY );
   vid_text( GX0, GY0 + GROWS * CH, t, DGRAY, -1 );
+  ui_scrollbar( SBX, SBY, SBH, pages, 1, page );
   gui_mouse_show( );
+}
+
+static void draw_grid( void ) {
+  int page = s_sel / PER_PAGE;
+  for ( int k = 0; k < PER_PAGE; k++ ) draw_cell( page * PER_PAGE + k, page * PER_PAGE + k == s_sel );
+  draw_page_info( page );
+}
+
+// sb_track callback: the selection moves to the same place on the new page, like PgDn.
+// While the bar is dragged only the counter and bar follow; the six thumbnails (read from
+// disk) are drawn when the pointer pauses or the button is released.
+static void grid_scrolled( void *, int page, int dragging ) {
+  if ( dragging ) { draw_page_info( page ); return; }
+  int i = page * PER_PAGE + s_sel % PER_PAGE;
+  if ( i >= s_n ) i = s_n - 1;
+  if ( i < 0 ) return;
+  s_sel = i;
+  draw_grid( );
 }
 
 static void draw_list_preview( void ) {
@@ -149,6 +173,7 @@ static void draw_list_preview( void ) {
 void gallery_draw( void ) {
   s_ws[0].flags = s_grid ? WF_HIDDEN : 0;
   s_ws[0].sel = s_sel;
+  s_ws[0].flags &= ~WF_FREEVIEW;
   s_ws[6].text = s_grid ? "List" : "Grid";
   if ( s_grid && s_form.focus == 0 ) s_form.focus = 1;
   form_draw( &s_form );
@@ -166,7 +191,7 @@ static void select( int i ) {
   int oldPage = s_sel / PER_PAGE;
   int old = s_sel;
   s_sel = i;
-  if ( !s_grid ) { s_ws[0].sel = i; form_draw_widget( &s_form, 0 ); draw_list_preview( ); return; }
+  if ( !s_grid ) { s_ws[0].sel = i; s_ws[0].flags &= ~WF_FREEVIEW; form_draw_widget( &s_form, 0 ); draw_list_preview( ); return; }
   if ( i / PER_PAGE != oldPage ) draw_grid( );
   else { draw_cell( old, 0 ); draw_cell( i, 1 ); }
 }
@@ -345,6 +370,10 @@ int gallery_event( Event *e ) {
     if ( k == K_PGDN )  { select( s_sel + PER_PAGE ); return CMD_NONE; }
     if ( k == K_HOME )  { select( 0 ); return CMD_NONE; }
     if ( k == K_END )   { select( s_n - 1 ); return CMD_NONE; }
+  }
+  if ( s_grid && e->type == EV_DOWN && ui_hit( e->x, e->y, SBX, SBY, 10, SBH ) ) {
+    sb_track( SBX, SBY, SBH, grid_pages( ), 1, s_sel / PER_PAGE, 1, e->x, e->y, grid_scrolled, 0 );
+    return CMD_NONE;
   }
   if ( s_grid && e->type == EV_DOWN && e->y >= GY0 - 3 && e->y < GY0 + GROWS * CH ) {
     int col = ( e->x - GX0 + 4 ) / CW, row = ( e->y - GY0 + 3 ) / CH;

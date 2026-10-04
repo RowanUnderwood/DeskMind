@@ -20,7 +20,8 @@ KEYS
   Esc = cancel a dialog, or stop a reply or drawing
 
 CHAT (F2)
-  Type, press Enter. PgUp/PgDn scroll. Ask for a picture in plain words
+  Type, press Enter. PgUp/PgDn or the scroll bar scroll (click above or
+  below its box, or drag the box). Ask for a picture in plain words
   ("draw a castle at sunset") and Qwen draws it. Click a thumbnail to see
   it full screen. Picture = attach a gallery picture and ask about it.
   Chats = reopen or delete saved chats.   New = fresh chat.
@@ -33,9 +34,10 @@ CREATE (F3)
   Pictures menu > Enhance rules = how Qwen improves prompts.
 
 GALLERY (F4)
-  Grid or List. Enter views. Rename, Delete (this Tandy only) or
-  Everywhere (MindServer too), Ask Qwen, Sync (fetch pictures made on
-  the PC), Slideshow. Shows the newest 500 pictures.
+  Grid or List; arrows, PgUp/PgDn or the scroll bar move. Enter views.
+  Rename, Delete (this Tandy only) or Everywhere (MindServer too),
+  Ask Qwen, Sync (fetch pictures made on the PC), Slideshow.
+  Shows the newest 500 pictures.
 
 SLIDESHOW (F6, or SLIDES from DOS - no network needed)
   SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]

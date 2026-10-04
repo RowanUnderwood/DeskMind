@@ -47,6 +47,17 @@ int  gui_has_mouse( void );
 void ui_desktop( void );
 void ui_bevel( int x, int y, int w, int h, int raised );          // 3-D frame
 void ui_sunken( int x, int y, int w, int h, unsigned char fill );
+
+// Scroll bars (10 px wide).  The box shows `visible` of `total` lines starting at `top`.
+void ui_scrollbar( int x, int y, int h, int total, int visible, int top );
+void sb_thumb( int h, int total, int visible, int top, int *ty, int *th );   // box offset from y, height
+// Called by sb_track with each new top.  dragging = 1 while the box is still being dragged and
+// the pointer is moving (a screen may draw less then); a final call with 0 always follows.
+typedef void ( *sb_apply_fn )( void *ctx, int top, int dragging );
+// Handles a press at (mx,my) on the bar until release: on the box it drags; above or below it
+// moves a page (`page` lines) and repeats while held until the box reaches the pointer.
+void sb_track( int x, int y, int h, int total, int visible, int top, int page,
+               int mx, int my, sb_apply_fn apply, void *ctx );
 void ui_window( int x, int y, int w, int h, const char *title, int active );
 void ui_button( int x, int y, int w, int h, const char *label, int flags );
 void ui_status( const char *text );                               // bottom line
@@ -71,6 +82,7 @@ enum { W_LABEL, W_BUTTON, W_EDIT, W_MEMO, W_LIST, W_CHECK };
 #define WF_HIDDEN   4
 #define WF_DISABLED 8
 #define WF_READONLY 16       // edit/memo
+#define WF_FREEVIEW 32       // list: the scroll bar moved the view, so don't pull it back to the selection
 
 struct Widget;
 typedef const char far *( *list_item_fn )( void *ctx, int index );
