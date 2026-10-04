@@ -39,14 +39,20 @@ Tandy (boot W) --WiFi, HTTP port 8286--> MindServer (this PC)
 
 A service that already answers is not started twice.
 
-**NInfer needs about 22 GB free on GPU 0**, so start it right after a clean boot, before browsers or games. If Qwen isn't running,
-DeskMind says so and names this PC's address. Create can still draw your prompt as typed, without Qwen.
+**Which Qwen:** the Services tab's "Qwen model for Start" picks the model NInfer loads: `thinkingcap` (the default, the
+ThinkingCap-Qwen3.8-27B fine-tune) or `full` (the published NVFP4 build). Both answer as `qwen3.8-27b`. The choice only applies
+when MindServer or `START-MINDSERVER.bat` starts NInfer; a NInfer that is already running (maybe started by another app) keeps
+its model, and MindServer warns in its log and console. Stop and start NInfer to switch.
+
+**NInfer needs about 29 GB free on GPU 0 for thinkingcap** (25 GB for full), so start it right after a clean boot, before browsers
+or games. It then runs with a 65,536-token context, far more than DeskMind needs. If Qwen isn't running, DeskMind says so and
+names this PC's address. Create can still draw your prompt as typed, without Qwen.
 
 ### The MindServer window
 
 | Tab | What it's for |
 |---|---|
-| **Services** | Status lights for NInfer, ComfyUI and MindServer, start/stop buttons, the log, and which Tandy is connected |
+| **Services** | Status lights for NInfer, ComfyUI and MindServer, start/stop buttons, the Qwen model choice and the model running now, the log, and which Tandy is connected |
 | **Generation** | Krea 2 settings (steps, picture size, LoRA) and a test generation |
 | **Dither Lab** | Try dithering settings on any picture: the original beside the Tandy version at the right shape, plus a pixel zoom. Save the settings as the default |
 | **Gallery** | The pictures MindServer holds |
@@ -218,3 +224,56 @@ MindServer writes `helper\settings.json` the first time you save a setting; it r
 - Install on the card: `tools\card_install.ps1 -Tag <what> -Folder DESKMIND -Files ...` (dated backups, checks, compare).
 - Design, protocol and history: `PLAN.md`, `CLAUDE.md`, `TESTING.md`.
 - DeskMind includes mTCP, so it is **GPLv3**.
+
+### How the 640x200x16 mode works
+
+The TL/3 BIOS has no mode number for 640x200x16, so DeskMind and SLIDES set the video registers themselves.
+Everything is in `dos\src\video.cpp`. The register values come from TANDOTS.ASM, a 1995 program written for the SL/TL/RL.
+
+**1. Claim the memory (`vid_reserve`).** The Tandy has no separate video memory: this mode shows the top 64K of the 640K
+(576K-640K, segment `9000h`). DOS holds back only the top 16K (INT 12h reports 624K), so DeskMind takes 576K-624K from DOS first:
+
+- It saves DOS's allocation strategy and UMB link state, unlinks the UMBs and switches to **last fit** (INT 21h AX=5801h, BX=2).
+  Then it allocates the block with INT 21h AH=48h, so it comes from the top of the highest free block, and puts the old settings back.
+- A block that starts above `9000h` means something else holds that memory: it is freed and DeskMind stops.
+- A gap between the block and DOS's top is allowed only if it holds DOS system blocks (owner 8), 1K at most. With `DOS=UMB`,
+  MS-DOS keeps its one-paragraph "SC" UMB link block at `9BFFh`, inside the video memory. That gap is remembered as the "tail".
+  Anything else there is refused.
+
+If this fails, DeskMind prints why and exits before it touches the video hardware.
+
+**2. Switch the mode on (`vid_open`).**
+
+1. Remember the current BIOS mode (INT 10h AH=0Fh).
+2. `tail_protect()` unlinks the UMBs and copies the SC block to a buffer. Pixels will overwrite that memory, and DOS must not
+   walk the memory chain through it.
+3. `set_640()`:
+   - BIOS mode 3 first, so the BIOS data area is valid when DeskMind goes back to text.
+   - Display off (`3D8h` = 13h) while the registers are loaded.
+   - CRTC (`3D4h`/`3D5h`): register 9 (scan lines per row) is set to 0 **first**. With the text value still in place, the new
+     row counts would briefly mean 1600+ lines, which crashed 86Box. Then registers 0-7, 0Ch/0Dh and 10h-12h.
+   - Video Array (index `3DAh`, data `3DEh`): palette mask 0Fh, border 0, mode control 10h, **register 5 = 01h (the
+     640x200x16 enable bit)**, register 8 = 02h.
+   - `3D9h` = 0, `3DDh` = 0 (extended RAM paging off), **`3DFh` = 24h** (addressing mode; page 2, the top 64K, is displayed).
+   - Clear 64K at `A000:0000`, display on (`3D8h` = 1Bh).
+4. Build the line address table and load the 8x8 ROM font (INT 1Fh for characters 128-255).
+
+**3. Draw.** The screen is a plain linear framebuffer at `A000:0000`: 320 bytes per line, two pixels per byte, **left pixel
+in the high nibble**. There are no interleaved banks as in the CGA-style modes, so fills, scrolls, saving and restoring
+screen areas, and full-screen copies are plain memory copies. That keeps slideshow transitions cheap, and pictures load
+straight from the file into video memory. The 320x200x16 fallback is the only path that uses the BIOS: INT 10h mode 9,
+with four interleaved 8K banks at `B800`.
+
+**4. Switch it off (`vid_close`, `vid_unreserve`).** `unset_640()` reloads text-mode CRTC values, clears Video Array
+register 5 and sets `3DFh` back to 3Fh, then the original BIOS mode is set again (mode 7 becomes 3). `tail_restore()`
+runs **after** that, once text mode no longer uses the memory: it copies the SC block back and relinks the UMBs.
+Finally the DOS block is freed.
+
+Rules that follow from this:
+
+- **Never print with `printf` while the mode is on.** The BIOS still thinks it's in text mode and writes the characters
+  into video memory. All messages go through the GUI.
+- The mouse driver (INT 33h) is used only for position and buttons, because CuteMouse can't draw in this mode. DeskMind draws
+  its own pointer.
+- SLIDES checks the machine first with `vid_detect()`: no VGA/EGA BIOS answers, model byte FFh at `FFFF:000E`, Tandy
+  signature 21h at `FC00:0000`, and INT 15h AH=C0h succeeds (older 1000s return carry). DeskMind goes straight to `vid_reserve`.

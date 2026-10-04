@@ -41,6 +41,7 @@ rows in the parent's `games.csv` (source `OWN`, recipe field `home="DESKMIND"`).
 | Path | What |
 |---|---|
 | `PLAN.md` | Approved plan |
+| `REDDIT.md` | Reddit launch reactions (2026-10-01) and lessons for the next post: title, voice, ideas. Read it before writing any public post |
 | `dos\` | DeskMind sources (C-style C++, Open Watcom v2). `build.bat` builds everything into `dos\out\` |
 | `dos\spike\` | Phase 0 test programs (V640, NETTEST) |
 | `helper\` | MindServer (Python) |
@@ -181,6 +182,27 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   overflowed a 16-bit int (124 * 550), in `scr_chat.cpp` and in the gui.cpp list (Gallery list past about 250
   pictures). Both now use long math. **Watch for int overflow in any product with a line or picture count.**
   About now lists the limits (newest 500 pictures, newest 100 chats, about 40,000 characters per chat).
+- MindServer GUI (2026-10-01): Gallery "Export as PNG…" / "Export all as PNGs…" (default folder `docs\`) save the TPI as
+  the Tandy shows it, 1280x960 4:3 (`dither.screen_shot`, `Store.export_png`, names from `store.file_slug(title)`).
+  Services "Shut down all" stops NInfer (stop bat) and ComfyUI (port kill) unless they're down, then closes MindServer.
+- **Qwen model (2026-10-04): thinkingcap by default.** NInfer now runs its native Windows backend (`launch-ninfer.bat`
+  `BACKEND=windows`, v3 models). Setting `services.ninfer_model` (`thinkingcap` | `full` | blank = the bat's own `WIN_MODEL`,
+  which is `full`), chosen in the Services tab. `Services.start()` and `START-MINDSERVER.bat` (via `python -m mindserver.services
+  model`) preset `WIN_MODEL` in NInfer's environment. Both models answer as `qwen3.8-27b`; the only way to tell them apart is
+  `H:\Ninfer Qwen\logs\current-model.txt` (plus `current-context.txt`), written by the bat on every start. `services.ninfer_running()`
+  reads them; a running NInfer with the other model is reused **with a warning only** (log, Services label, `services check`
+  in the bat), never restarted, because another app (Video Narrator) may be using it. thinkingcap = 65,536 context with 1 GiB
+  spare (needs ~28.5 GiB free on GPU 0); full gets 131,072. DeskMind's biggest request is ~15k tokens.
+  **Only one `system` message, first.** The thinkingcap chat template raises (HTTP 400 `invalid_prompt`, chat_template.jinja
+  line 106) on a later system message; `full` tolerated it. Vision used to add a second one; `_vision_text` is now appended to
+  the leading system message. `tests\qwen_smoke.py` (live, needs all services) runs chat, memory, Markdown cleanup, `<draw>`,
+  vision follow-up, attached vision and enhance through MindServer's HTTP API and writes `out\qwen_smoke_<model>.json`;
+  it deletes its chats and pictures. 2026-10-04: 8/8 on thinkingcap (twice) and on full; replies 0.5-1.5 s, draw 8 s.
+- **Tandy facts in `system_chat.txt` (2026-10-04).** Both models called the TL/3 a portable and thinkingcap said "1 MB of RAM",
+  so the prompt has an "About the Tandy" block (use when relevant, don't recite, say when unsure), sourced from TANDY-SYSTEM.md.
+  The TL/3 is from **February 1991** (Tech Monitor, 19 Feb 1991), not 1989 as the prompts said; `enhance.txt` fixed too.
+  Old prompts: `helper\out\*.txt.bak-20261004`. Smoke test gained "tandy facts" (640 / 1991 / 720, no laptop) and
+  "no spec recital" (Paris answer without specs): 10/10 on thinkingcap.
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.
@@ -221,4 +243,4 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   mtools-writes a work copy, checks it (fsck.fat -n, 7z t, 8.3-only via `tools\check_83.py`, full extract `diff -rq`), copies it back once,
   compares, and saves an "after" backup in `..\backup\`. mtools is used instead of pyfatfs (pyfatfs has the multi-file FAT bug;
   see `H:\Tandy\CLAUDE.md`). The old `D:\DMTEST` folder on the card holds round 1-2 logs only.
-- NInfer can only start from a clean boot (it needs about 22GB free on GPU 0). Don't try to start it during a session without asking.
+- NInfer can only start from a clean boot (thinkingcap needs about 28.5 GB free on GPU 0, full about 24.5). Don't try to start it during a session without asking.

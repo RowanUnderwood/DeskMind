@@ -28,14 +28,20 @@ if /i "%MODE%"=="server" goto server
 if /i "%MODE%"=="noqwen" goto comfy
 
 rem Skip services that already answer (a second copy would fail on its port / database)
+rem The Qwen model (thinkingcap or full) is MindServer's ninfer_model setting;
+rem launch-ninfer.bat takes a WIN_MODEL preset from the environment.
+pushd "%HERE%helper"
 call :alive http://127.0.0.1:1234/health
 if not errorlevel 1 (
     echo NInfer is already running - not starting it again.
+    "%PY%" -m mindserver.services check
 ) else (
+    for /f "usebackq delims=" %%m in (`"%PY%" -m mindserver.services model`) do set "WIN_MODEL=%%m"
     echo Starting NInfer ^(Qwen, RTX 5090^)...
     start "NInfer (5090)" cmd /c call "H:\Ninfer Qwen\launch-ninfer.bat"
     timeout /t 5 /nobreak >nul
 )
+popd
 
 :comfy
 call :alive http://127.0.0.1:8188/system_stats

@@ -244,3 +244,12 @@ def preview_4x3(idx: np.ndarray, s: DitherSettings | None = None, width: int = 6
     """How it looks on the Tandy's 4:3 screen: pixels stretched to their real shape."""
     img = to_rgb(idx, s)
     return img.resize((width, width * 3 // 4), Image.Resampling.NEAREST)
+
+
+def screen_shot(idx: np.ndarray, s: DitherSettings | None = None, width: int = 1280) -> Image.Image:
+    """Full-size 4:3 picture of the Tandy screen, for docs and sharing.  Columns are
+    repeated (nearest), rows go through a box filter: 200 lines don't divide 960 rows
+    evenly, so a line that straddles two output rows is blended instead of jittering."""
+    img = to_rgb(idx, s)
+    return (img.resize((width, idx.shape[0] * 8), Image.Resampling.NEAREST)
+               .resize((width, width * 3 // 4), Image.Resampling.BOX))

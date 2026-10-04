@@ -31,6 +31,13 @@ def make_title(prompt: str, limit: int = tpi.TITLE_LEN - 1) -> str:
     return (cut if len(cut) > limit // 2 else words[:limit]).rstrip(",.;:")
 
 
+def file_slug(title: str, limit: int = 40) -> str:
+    """A file name stem from a title: "Dungeon Wraiths!" -> "dungeon-wraiths"."""
+    s = "".join(c if c.isascii() and c.isalnum() else "-" for c in title.lower())
+    s = "-".join(p for p in s.split("-") if p)[:limit].strip("-")
+    return s or "picture"
+
+
 class Store:
     def __init__(self, folder: str = IMG_DIR):
         self.folder = folder
@@ -142,6 +149,13 @@ class Store:
         if settings is None:
             settings = D.DitherSettings(mode=mode)
         return self.build_tpi(id_, settings)
+
+    def export_png(self, id_: str, path: str, settings: D.DitherSettings | None = None) -> None:
+        """Save the picture as the Tandy shows it (its TPI, stretched to 4:3) as a PNG.
+        `settings` only supplies the palette."""
+        info = tpi.parse(self.tpi_bytes(id_))
+        idx = D.unpack(info.image, info.width, info.height)
+        D.screen_shot(idx, settings).save(path, optimize=True)
 
     def drop_tpi_cache(self, id_: str) -> None:
         """Forget the Tandy files (after the dither settings changed); rebuilt on next request."""

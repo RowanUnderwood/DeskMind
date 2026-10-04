@@ -25,10 +25,13 @@ from . import dither as D
 from . import tpi
 from .config import HELPER_DIR, PROJECT_DIR, Config
 from .server import VERSION, MindServer
+from .services import ninfer_mismatch, ninfer_running
+from .store import file_slug
 
 log = logging.getLogger("mindserver.gui")
 
 DOT = {"up": "#2ecc40", "down": "#ff4136", "unknown": "#aaaaaa"}
+EXPORT_DIR = os.path.join(PROJECT_DIR, "docs")
 
 
 def to_pixmap(img: Image.Image) -> QPixmap:
@@ -116,9 +119,26 @@ class ServicesTab(QWidget):
         self.dot_server.setStyleSheet(f"color: {DOT['up']}; font-size: 16px")
         g.addWidget(QLabel(f"<b>MindServer {VERSION}</b>"), 2, 1)
         g.addWidget(QLabel(f"port {s['port']}  (DeskMind connects here)"), 2, 2)
-        note = QLabel("NInfer needs about 22 GB free on GPU 0; start it first, from a clean boot if it refuses.")
+        g.addWidget(QLabel("Qwen model for Start"), 3, 1)
+        self.model = QComboBox()
+        self.model.addItem("thinkingcap (ThinkingCap fine-tune)", "thinkingcap")
+        self.model.addItem("full (published NVFP4)", "full")
+        self.model.addItem("launch-ninfer.bat's own choice", "")
+        self.model.setCurrentIndex(max(0, self.model.findData(win.config["services"]["ninfer_model"])))
+        self.model.setToolTip("Sets WIN_MODEL when MindServer or START-MINDSERVER starts NInfer.\n"
+                              "A running NInfer keeps its model until it is stopped and started again.")
+        self.model.currentIndexChanged.connect(self.model_changed)
+        g.addWidget(self.model, 3, 2)
+        self.running = QLabel()
+        g.addWidget(self.running, 3, 3, 1, 3)
+        note = QLabel("NInfer needs about 29 GB free on GPU 0 for thinkingcap (25 GB for full); "
+                      "start it first, from a clean boot if it refuses.")
         note.setStyleSheet("color: #888")
-        g.addWidget(note, 3, 1, 1, 4)
+        g.addWidget(note, 4, 1, 1, 4)
+        b_off = QPushButton("Shut down all")
+        b_off.setToolTip("Stop NInfer and ComfyUI, then close MindServer")
+        b_off.clicked.connect(self.shutdown)
+        g.addWidget(b_off, 2, 3, 1, 2)
         g.setColumnMinimumWidth(1, 220)
         g.setColumnMinimumWidth(2, 260)
         for col in (3, 4):
@@ -150,6 +170,27 @@ class ServicesTab(QWidget):
         for k, dot in self.dots.items():
             dot.setStyleSheet(f"color: {DOT.get(st.get(k), '#e0a000')}; font-size: 16px")
             dot.setToolTip(st.get(k, "?"))
+        self.show_running(st.get("qwen"))
+
+    def show_running(self, qwen: str | None = None):
+        if (qwen or self.win.server.services.status.get("qwen")) != "up":
+            self.running.setText("")
+            return
+        model, ctx = ninfer_running(self.win.config)
+        text = f"running: {model or '?'}, {int(ctx):,} context" if ctx.isdigit() else f"running: {model or '?'}"
+        if ninfer_mismatch(self.win.config):
+            self.running.setText(f"<span style='color:#e0a000'>{text} - restart NInfer to switch</span>")
+        else:
+            self.running.setText(text)
+
+    def model_changed(self):
+        self.win.config["services"]["ninfer_model"] = self.model.currentData()
+        self.win.config.save()
+        log.info("Qwen model for Start: %s", self.model.currentData() or "launch-ninfer.bat's own choice")
+        warn = ninfer_mismatch(self.win.config)
+        if warn and self.win.server.services.status.get("qwen") == "up":
+            log.warning(warn)
+        self.show_running()
 
     def refresh_clients(self):
         now = time.time()
@@ -170,6 +211,25 @@ class ServicesTab(QWidget):
                 == QMessageBox.StandardButton.Yes:
             log.info("stopping %s", key)
             self.win.server.services.stop(key)
+
+    def shutdown(self):
+        if QMessageBox.question(self, "Shut down all",
+                                "Stop NInfer and ComfyUI and close MindServer?\n"
+                                "The Tandy loses its connection until MindServer runs again.") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        services = self.win.server.services
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for key, name in (("qwen", "NInfer"), ("comfy", "ComfyUI")):
+                if services.status.get(key) == "down":
+                    log.info("%s is not running", name)
+                else:
+                    log.info("stopping %s", name)
+                    services.stop(key)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.win.close()                        # closeEvent stops the server; the app then exits
 
 
 # ====================================================================== Generation
@@ -532,8 +592,13 @@ class GalleryTab(QWidget):
         self.info = QPlainTextEdit(); self.info.setReadOnly(True)
         side.addWidget(self.info, 1)
         for text, fn in [("Refresh", self.refresh), ("Rename…", self.rename), ("Delete", self.delete),
-                         ("Open in Dither Lab", self.to_lab), ("Rebuild Tandy files", self.rebuild)]:
+                         ("Open in Dither Lab", self.to_lab), ("Rebuild Tandy files", self.rebuild),
+                         ("Export as PNG…", self.export_one), ("Export all as PNGs…", self.export_all)]:
             b = QPushButton(text); b.clicked.connect(fn); side.addWidget(b)
+            if text.startswith("Export"):
+                b.setToolTip("Saves pictures as the Tandy shows them: the 16-colour dither, "
+                             "stretched to the 4:3 screen (1280x960)")
+                self.b_export_all = b           # the last one
         wrap = QWidget(); wrap.setLayout(side); wrap.setMaximumWidth(340)
         lay.addWidget(wrap)
         self.refresh()
@@ -602,6 +667,71 @@ class GalleryTab(QWidget):
             s.mode = st.meta(id_).get("mode", s.mode)
             st.build_tpi(id_, s)
             self.refresh()
+
+    def export_one(self):
+        id_ = self.current_id()
+        if not id_:
+            return
+        name = file_slug(self.win.server.store.meta(id_)["title"]) + ".png"
+        path, _ = QFileDialog.getSaveFileName(self, "Export picture", os.path.join(EXPORT_DIR, name),
+                                              "PNG images (*.png)")
+        if path:
+            self.win.server.store.export_png(id_, path, self.win.config.dither_settings())
+            log.info("exported %s to %s", id_, path)
+
+    def export_all(self):
+        folder = QFileDialog.getExistingDirectory(self, "Export all pictures to", EXPORT_DIR)
+        if not folder:
+            return
+        st = self.win.server.store
+        jobs, used = [], set()
+        for m in st.list():
+            stem = file_slug(m["title"])
+            if stem in used:                    # two pictures with the same title
+                stem += "-" + m["id"].lower()
+            used.add(stem)
+            jobs.append((m["id"], os.path.join(folder, stem + ".png")))
+        clash = sum(os.path.exists(p) for _, p in jobs)
+        overwrite = False
+        if clash:
+            box = QMessageBox(QMessageBox.Icon.Question, "Export all",
+                              f"{clash} of the {len(jobs)} files already exist in that folder.", parent=self)
+            b_skip = box.addButton("Skip them", QMessageBox.ButtonRole.AcceptRole)
+            b_over = box.addButton("Overwrite", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            if box.clickedButton() not in (b_skip, b_over):
+                return
+            overwrite = box.clickedButton() is b_over
+        pal = self.win.config.dither_settings()
+
+        def work():
+            done = skipped = 0
+            for id_, path in jobs:
+                if os.path.exists(path) and not overwrite:
+                    skipped += 1
+                    continue
+                st.export_png(id_, path, pal)
+                done += 1
+            return done, skipped
+
+        self.b_export_all.setEnabled(False)
+        log.info("exporting %d pictures to %s", len(jobs), folder)
+        self._task = Task(work)                 # keep it alive until its signal is delivered
+        self._task.setAutoDelete(False)
+        self._task.signals.done.connect(lambda r, e: self.exported(folder, r, e))
+        QThreadPool.globalInstance().start(self._task)
+
+    def exported(self, folder, result, error):
+        self.b_export_all.setEnabled(True)
+        if error:
+            log.error("export failed: %s", error)
+            QMessageBox.warning(self, "Export all", f"Export failed:\n{error}")
+            return
+        done, skipped = result
+        msg = f"Exported {done} pictures to {folder}" + (f" ({skipped} existing files skipped)" if skipped else "")
+        log.info(msg)
+        QMessageBox.information(self, "Export all", msg)
 
 
 # ====================================================================== AI (Qwen)

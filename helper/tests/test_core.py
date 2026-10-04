@@ -10,7 +10,7 @@ from PIL import Image  # noqa: E402
 
 from mindserver import dither as D  # noqa: E402
 from mindserver import tpi  # noqa: E402
-from mindserver.store import Store, make_title  # noqa: E402
+from mindserver.store import Store, file_slug, make_title  # noqa: E402
 
 
 def sample() -> Image.Image:
@@ -59,6 +59,15 @@ def test_title():
     t = make_title("A very long prompt about a beige Tandy 1000 computer with a glowing brain on the screen")
     assert len(t) <= 39 and not t.endswith(" ")
     print("title ok:", t)
+    assert file_slug('Dungeon Wraiths: "3D" é!') == "dungeon-wraiths-3d"
+    assert file_slug("***") == "picture"
+
+
+def test_screen_shot():
+    for mode in ("640", "320"):
+        img = D.screen_shot(D.convert(sample(), D.DitherSettings(engine="pillow", mode=mode)))
+        assert img.size == (1280, 960) and img.mode == "RGB"
+    print("screen shot ok")
 
 
 def _stream(pieces):
@@ -105,6 +114,7 @@ if __name__ == "__main__":
     test_tpi_roundtrip()
     test_store()
     test_title()
+    test_screen_shot()
     test_text_stream()
     test_transcript()
     print("ALL OK")

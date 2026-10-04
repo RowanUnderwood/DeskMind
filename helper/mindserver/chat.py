@@ -259,7 +259,8 @@ class ChatEngine:
                 view_id, earlier = recent, True
         if view_id:
             parts, two = self._vision_parts(view_id)
-            msgs.append({"role": "system", "content": self._vision_text(view_id, earlier, two)})
+            # One system message only: Qwen chat templates (ThinkingCap's at least) reject a later one
+            msgs[0]["content"] += "\n\n" + self._vision_text(view_id, earlier, two)
             content = parts + [{"type": "text", "text": user_text}]
             effort = self.config["qwen"]["effort_vision"]
         else:

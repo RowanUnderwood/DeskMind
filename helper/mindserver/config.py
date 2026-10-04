@@ -40,6 +40,7 @@ DEFAULTS = {
     "services": {
         "ninfer_bat": r"H:\Ninfer Qwen\launch-ninfer.bat",
         "ninfer_stop_bat": r"H:\Ninfer Qwen\stop-ninfer.bat",
+        "ninfer_model": "thinkingcap",    # thinkingcap | full | "" = launch-ninfer.bat's own WIN_MODEL
         "comfy_bat": os.path.join(PROJECT_DIR, "run_comfy_image.bat"),
     },
     "dither": DitherSettings(engine="pillow", method="floyd-steinberg").to_dict(),

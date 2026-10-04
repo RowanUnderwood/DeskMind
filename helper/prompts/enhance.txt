@@ -1,6 +1,6 @@
 Rewrite the user's picture idea as a prompt for an image generator (Krea 2).
 
-The picture will be shown on a 1989 Tandy computer: 16 fixed colours, 640x200 pixels, with dithering. So the prompt should ask for:
+The picture will be shown on a 1991 Tandy computer: 16 fixed colours, 640x200 pixels, with dithering. So the prompt should ask for:
 - one clear main subject, large in the frame
 - bold, simple shapes and strong contrast
 - a simple, uncluttered background
