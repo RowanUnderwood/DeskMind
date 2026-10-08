@@ -36,6 +36,73 @@ def test_tpi_roundtrip():
         print(f"tpi {mode}: {len(data)} bytes ok")
 
 
+def test_pack_bits():
+    import numpy as np
+    rng = np.random.default_rng(1)
+    for bits, w in ((4, 640), (2, 320), (1, 640)):
+        idx = rng.integers(0, 1 << bits, (200, w), dtype=np.uint8)
+        data = D.pack(idx, bits)
+        assert len(data) == w * 200 * bits // 8
+        assert (D.unpack(data, w, 200, bits) == idx).all()
+    # Leftmost pixel in the high bits, as the CGA expects
+    assert D.pack(np.array([[1, 2, 3, 0]], dtype=np.uint8), 2) == bytes([0b01101100])
+    assert D.pack(np.array([[1, 0, 0, 0, 0, 0, 0, 1]], dtype=np.uint8), 1) == bytes([0x81])
+    print("pack bits ok")
+
+
+def test_cga_choose():
+    s = D.DitherSettings(engine="pillow", mode="cga")
+    # Flat cyan/magenta/white bands on black: palette 1 bright (11/13/15), background black
+    bands = Image.new("RGB", (400, 300))
+    for i, c in enumerate([(0, 0, 0), (85, 255, 255), (255, 85, 255), (255, 255, 255)]):
+        bands.paste(c, (i * 100, 0, i * 100 + 100, 300))
+    layout, pal, bg, _ = D.cga_choose(bands, s)
+    assert (layout, pal, bg) == ("cga4", 3, 0), (layout, pal, bg)
+    # Green/red/yellow on blue: palette 0 bright with a blue background
+    bands2 = Image.new("RGB", (400, 300))
+    for i, c in enumerate([(0, 0, 170), (85, 255, 85), (255, 85, 85), (255, 255, 85)]):
+        bands2.paste(c, (i * 100, 0, i * 100 + 100, 300))
+    assert D.cga_choose(bands2, s)[:3] == ("cga4", 1, 1)
+    # A grey gradient: black and white wins
+    grad = Image.linear_gradient("L").resize((400, 300)).convert("RGB")
+    assert D.cga_choose(grad, s)[0] == "cga2"
+    # Overrides
+    assert D.cga_choose(bands, D.DitherSettings(mode="cga", cga_choice="mono"))[0] == "cga2"
+    assert D.cga_choose(grad, D.DitherSettings(mode="cga", cga_choice="2: x", cga_bg=1))[:3] == ("cga4", 2, 1)
+    assert D.cga_choose(bands, D.DitherSettings(mode="cga", cga_mode5=False))[1] < 4
+    print("cga choose ok")
+
+
+def test_tpi_cga():
+    img = sample()
+    for choice, layout in (("auto", None), ("1: x", "cga4"), ("mono", "cga2")):
+        s = D.DitherSettings(engine="pillow", mode="cga", cga_choice=choice)
+        d, th = D.render(img, s), D.thumbnail(img, s)
+        assert th.shape == (50, 160) and th.max() <= 1
+        assert d.layout == (layout or d.layout)
+        assert d.idx.shape == ((200, 320) if d.layout == "cga4" else (200, 640))
+        assert d.idx.max() < len(d.rgb)
+        data = tpi.build("CAFE0001", d.layout, d.idx, th, "CGA", "a prompt", 7, None, d.cga_pal, d.cga_color)
+        info = tpi.parse(data)
+        assert info.mode == "cga" and info.layout == d.layout
+        assert (info.cga_pal, info.cga_color) == (d.cga_pal, d.cga_color)
+        assert (info.image_idx() == d.idx).all() and (info.thumb_idx() == th).all()
+        assert info.rgb(s) == d.rgb
+        assert len(info.thumb) == 1000 and len(info.image) == 16000          # both CGA layouts
+        print(f"tpi cga {choice}: {d.describe()}")
+
+
+def test_prompts_cga():
+    from mindserver.chat import PROMPTS, load_prompt
+    for name in ("chat", "enhance", "vision"):
+        tandy, cga = load_prompt(name), load_prompt(name, "cga")
+        assert tandy != cga and "CGA" in cga and "CGA" not in tandy.split("Tandy Video II")[0]
+        assert load_prompt(name, "640") == tandy
+    assert "{date}" in load_prompt("chat", "cga") and "{image_id}" in load_prompt("vision", "cga")
+    assert all(k in PROMPTS for k in ("chat_cga", "enhance_cga", "vision_cga"))
+    print("cga prompts ok")
+
+
 def test_store():
     with tempfile.TemporaryDirectory() as tmp:
         st = Store(tmp)
@@ -48,9 +115,16 @@ def test_store():
         assert tpi.parse(st.tpi_bytes(id_)).title == "My logo"
         s320 = D.DitherSettings(engine="pillow", mode="320")
         assert tpi.parse(st.tpi_bytes(id_, s320)).mode == "320"
+        scga = D.DitherSettings(engine="pillow", mode="cga")
+        assert tpi.parse(st.tpi_bytes(id_, scga)).mode == "cga"
+        assert os.path.exists(st.tpi_path(id_, "cga"))
+        st.rename(id_, "CGA logo")
+        assert tpi.parse(st.tpi_bytes(id_, scga)).title == "CGA logo"
+        assert tpi.parse(st.tpi_bytes(id_)).mode == "640"          # its own mode is untouched
         assert [m["id"] for m in st.list()] == [id_]
         st.delete(id_)
         assert not st.exists(id_) and st.list() == []
+        assert not os.listdir(tmp), os.listdir(tmp)
         print("store ok")
 
 
@@ -151,8 +225,59 @@ def test_transcript():
     print("transcript ok")
 
 
+def test_workflows():
+    from mindserver.comfy import ComfyClient, list_workflows
+    ok, bad = list_workflows()
+    assert "workflows/krea2_tandy.json" in ok and "workflows/krea2_fine_v5.json" in ok, (ok, bad)
+    for name, lora in (("workflows/krea2_tandy.json", True), ("workflows/krea2_fine_v5.json", False)):
+        c = ComfyClient(workflow=name)
+        assert c.has_lora() == lora
+        wf, seed = c.build("a red cube", seed=1234, steps=11, shortside=768, lora_on=False, lora_strength=0.5)
+        r = c.roles
+        assert seed == 1234
+        assert wf[r["prompt"]]["inputs"]["text"] == "a red cube"
+        assert wf[r["sampler"]]["inputs"]["seed"] == 1234 and wf[r["sampler"]]["inputs"]["steps"] == 11
+        assert wf[r["save"]]["inputs"]["filename_prefix"] == "DeskMind/dm"
+        size = wf[r["size"]]["inputs"]
+        if "megapixels" in size:
+            assert size["aspect_ratio"] == "4:3 (Standard)" and abs(size["megapixels"] - 0.786) < 0.001
+        else:
+            assert size["aspect"] == "4:3" and size["direction"] == "landscape" and size["shortside"] == 768
+        if lora:
+            assert wf[r["lora"]]["inputs"]["lora_1"] == {"on": False, "lora": "KNPV3_1.safetensors", "strength": 0.5}
+        assert c.template[r["prompt"]]["inputs"]["text"] != "a red cube"     # template untouched
+    assert ComfyClient(workflow="workflows/krea2_tandy.json").roles["prompt"] == "6"   # through the Rebalance node
+    assert ComfyClient(workflow="workflows/krea2_fine_v5.json").roles["prompt"] == "104"
+    print("workflows ok")
+
+
+def test_profiles():
+    import json
+    from mindserver.config import Config
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "settings.json")
+        with open(path, "w", encoding="utf-8") as f:     # settings from before profiles
+            json.dump({"comfy": {"workflow": "workflows/krea2_tandy.json", "steps": 9, "shortside": 640,
+                                 "lora_on": False, "lora_strength": 0.7}}, f)
+        cfg = Config(path)
+        assert cfg.comfy_profile() == {"steps": 9, "shortside": 640, "lora_on": False, "lora_strength": 0.7}
+        fine = cfg.comfy_profile("workflows/krea2_fine_v5.json")
+        assert fine["steps"] == 12 and fine["shortside"] == 640
+        cfg.set_comfy_profile("workflows/krea2_fine_v5.json", steps=10, bogus=1)
+        cfg.data["comfy"]["workflow"] = "workflows/krea2_fine_v5.json"
+        cfg.save()
+        cfg2 = Config(path)
+        assert cfg2.comfy_profile()["steps"] == 10 and "bogus" not in cfg2["comfy"]["profiles"]["workflows/krea2_fine_v5.json"]
+        assert cfg2.comfy_profile("workflows/krea2_tandy.json")["steps"] == 9
+    print("profiles ok")
+
+
 if __name__ == "__main__":
     test_tpi_roundtrip()
+    test_pack_bits()
+    test_cga_choose()
+    test_tpi_cga()
+    test_prompts_cga()
     test_store()
     test_title()
     test_screen_shot()
@@ -160,4 +285,6 @@ if __name__ == "__main__":
     test_old_draw_note()
     test_history()
     test_transcript()
+    test_workflows()
+    test_profiles()
     print("ALL OK")

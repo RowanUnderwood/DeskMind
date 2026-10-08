@@ -19,8 +19,9 @@
 #include "sys.h"
 #include "tpi.h"
 
-#define PITCH 320u
+#define PITCH vid_pitch          // 320 bytes (Tandy 640x200x16) or 80 (CGA)
 #define LINES 200
+#define U     ( vid_pitch / 80 )   // effect step unit: 4 bytes on the Tandy, 1 on CGA
 
 static const char *s_names[ FX_COUNT ] = {
   "Random", "Cut", "Wipe right", "Wipe down", "Blinds", "Interlace",
@@ -52,7 +53,7 @@ void slide_transition( int fx, const unsigned char far *img ) {
       break;
 
     case FX_WIPE_RIGHT:                        // 40 columns of 16 pixels
-      for ( unsigned bx = 0; bx < PITCH; bx += 8 ) copy_rect( img, bx, bx + 8, 0, LINES );
+      for ( unsigned bx = 0; bx < PITCH; bx += 2 * U ) copy_rect( img, bx, bx + 2 * U, 0, LINES );
       break;
 
     case FX_WIPE_DOWN:                         // 4 lines at a time
@@ -74,15 +75,17 @@ void slide_transition( int fx, const unsigned char far *img ) {
       }
       break;
 
-    case FX_DISSOLVE: {                        // 2000 blocks of 8x8 in LFSR order
-      unsigned lfsr = 1;
+    case FX_DISSOLVE: {                        // 2000 blocks of 8 lines (80 per line) in LFSR order
+      unsigned lfsr = 1, u = U;
       do {
         unsigned n = lfsr - 1;
         if ( n < 2000 ) {
-          unsigned bx = ( n % 80 ) * 4, by = ( n / 80 ) * 8;
+          unsigned bx = ( n % 80 ) * u, by = ( n / 80 ) * 8;
           const unsigned char far *s = img + by * PITCH + bx;
           for ( unsigned r = 0; r < 8; r++ ) {
-            *(unsigned long far *)( vid_line_ptr( by + r ) + bx ) = *(const unsigned long far *)s;
+            unsigned char far *d = vid_line_ptr( by + r ) + bx;
+            if ( u == 4 ) *(unsigned long far *)d = *(const unsigned long far *)s;
+            else *d = *s;
             s += PITCH;
           }
         }
@@ -93,15 +96,15 @@ void slide_transition( int fx, const unsigned char far *img ) {
 
     case FX_BOX_OUT:                           // a growing rectangle from the centre
       for ( int s = 1; s <= 20; s++ ) {
-        unsigned hw = (unsigned)s * 8;         // half width in bytes (16 px per step)
+        unsigned hw = (unsigned)s * 2 * U;     // half width in bytes (16 px per step)
         int hh = s * 5;                        // half height in lines
-        copy_rect( img, 160 - hw, 160 + hw, 100 - hh, 100 + hh );
+        copy_rect( img, PITCH / 2 - hw, PITCH / 2 + hw, 100 - hh, 100 + hh );
       }
       break;
 
     case FX_BOX_IN:                            // shrinking frame from the edges
       for ( int s = 0; s < 20; s++ ) {
-        unsigned o = (unsigned)s * 8, n = o + 8;
+        unsigned o = (unsigned)s * 2 * U, n = o + 2 * U;
         int y0 = s * 5, y1 = y0 + 5;
         copy_rect( img, 0, PITCH, y0, y1 );                    // top band
         copy_rect( img, 0, PITCH, LINES - y1, LINES - y0 );    // bottom band
@@ -111,7 +114,7 @@ void slide_transition( int fx, const unsigned char far *img ) {
       break;
 
     case FX_SLIDE_IN:                          // the new picture slides in over the old one
-      for ( unsigned o = 16; o <= PITCH; o += 16 ) {
+      for ( unsigned o = 4 * U; o <= PITCH; o += 4 * U ) {
         for ( int y = 0; y < LINES; y++ )
           _fmemcpy( vid_line_ptr( y ) + ( PITCH - o ), img + (unsigned)y * PITCH, o );
       }
@@ -124,12 +127,14 @@ void slide_transition( int fx, const unsigned char far *img ) {
 static void title_strip( const char *title, int n, int total, const char *extra ) {
   char t[100];
   sprintf( t, " %s", title );
-  vid_fill( 0, LINES - 11, 640, 11, 0 );
-  vid_hline( 0, 639, LINES - 11, 8 );
-  vid_text( 4, LINES - 9, t, 15, -1 );
+  vid_fill( 0, LINES - 11, vid_w, 11, 0 );
+  vid_hline( 0, vid_w - 1, LINES - 11, 8 );
   char r[40];
   sprintf( r, "%s%d/%d ", extra, n, total );
-  vid_text( ( 640 - (int)strlen( r ) * 8 ) & ~1, LINES - 9, r, 7, -1 );
+  int rx = ( vid_w - (int)strlen( r ) * 8 ) & ~1;
+  t[ ( rx - 12 ) / 8 > 0 ? ( rx - 12 ) / 8 : 0 ] = 0;     // 320 wide: keep the title clear of the counter
+  vid_text( 4, LINES - 9, t, 15, -1 );
+  vid_text( rx, LINES - 9, r, 7, -1 );
 }
 
 // Returns a key code, 1 for a mouse click, or 0
@@ -143,6 +148,8 @@ static int input( void ) {
   lastB = b;
   return click ? 1 : 0;
 }
+
+static int s_pal = -1, s_bg = -1;     // CGA palette on screen
 
 void slide_make_order( int *order, int count, int start, int shuffle ) {
   static int seeded = 0;
@@ -168,7 +175,8 @@ void slide_make_order( int *order, int count, int start, int shuffle ) {
 
 int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts *o ) {
   if ( count <= 0 ) return 0;
-  unsigned char far *buf = (unsigned char far *)_fmalloc( 64000u );
+  s_pal = s_bg = -1;
+  unsigned char far *buf = (unsigned char far *)_fmalloc( vid_is_cga( ) ? 16000u : 64000u );
   if ( !buf ) return 0;
   int *order = (int *)malloc( sizeof( int ) * count );
   if ( !order ) { _ffree( buf ); return 0; }
@@ -195,6 +203,16 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
       loaded = pos;
     }
     fails = 0;
+    if ( vid_is_cga( ) ) {
+      // CGA: each picture has its own mode and palette.  A new mode starts blank (the BIOS
+      // clears it); a new palette in the same mode would recolour the old picture, so blank first.
+      if ( tpi_vmode( &h ) != vid_mode ) tpi_set_mode( &h );
+      else if ( h.mode == 3 && ( h.cga_pal != s_pal || h.cga_color != s_bg ) ) {
+        for ( int y = 0; y < LINES; y++ ) _fmemset( vid_line_ptr( y ), 0, PITCH );
+        vid_cga_palette( h.cga_pal, h.cga_color );
+      }
+      s_pal = h.cga_pal; s_bg = h.cga_color;
+    }
     int fx = o->effect;
     if ( fx == FX_RANDOM ) fx = FX_WIPE_RIGHT + rand( ) % ( FX_COUNT - FX_WIPE_RIGHT );
     slide_transition( fx, buf );

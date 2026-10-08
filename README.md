@@ -53,7 +53,7 @@ names this PC's address. Create can still draw your prompt as typed, without Qwe
 | Tab | What it's for |
 |---|---|
 | **Services** | Status lights for NInfer, ComfyUI and MindServer, start/stop buttons, the Qwen model choice and the model running now, the log, and which Tandy is connected |
-| **Generation** | Krea 2 settings (steps, picture size, LoRA) and a test generation |
+| **Generation** | Workflow dropdown (any ComfyUI API-format workflow in `helper\workflows\`: Krea 2 Turbo, Krea 2 fine V5), its settings (steps, picture size, LoRA; remembered per workflow) and a test generation. The chosen workflow is used for everything, including Create and chat drawings on the Tandy |
 | **Dither Lab** | Try dithering settings on any picture: the original beside the Tandy version at the right shape, plus a pixel zoom. Save the settings as the default |
 | **Gallery** | The pictures MindServer holds |
 | **AI** | Qwen settings and the three instruction texts: chat, prompt improvement, and picture questions (`helper\prompts\*.txt`) |
@@ -70,7 +70,26 @@ and starts it. Without WiFi, DeskMind starts offline: the Gallery and slideshow 
 
 The first time, open **Settings (F5)** and check the MindServer address (this PC's LAN IP, e.g. `192.168.2.192`) and port `8286`.
 
-Options: `DESKMIND /NONET` (start offline), `DESKMIND /NOMOUSE` (keyboard only).
+Options: `DESKMIND /NONET` (start offline), `DESKMIND /NOMOUSE` (keyboard only), `DESKMIND /CGA` (CGA mode, below).
+
+### CGA mode (for a plain 286 with CGA)
+
+DeskMind also runs on PCs without Tandy video: on any PC without Tandy 1000 SL/TL/RL video it starts in CGA mode by
+itself, and on the Tandy `DESKMIND /CGA` (or `SLIDES /CGA`) tries it out.
+
+- **Screen:** 640x200 in black and white, the same layout as on the Tandy (title bars and selections are inverted, the
+  desktop is a grey checkerboard). Characters 128-255 (accents, bullets, box lines) come from DeskMind's own font when
+  the PC's BIOS has none.
+- **Pictures:** MindServer makes a CGA version of each picture and picks, per picture, what reproduces it best: 320x200
+  in 4 colours (one of the six CGA palettes, including the mode-5 cyan/red ones, plus any of the 16 background colours)
+  or 640x200 in black and white. The screen switches to that mode and palette while the picture shows. Thumbnails are
+  black and white. Dither Lab (mode `cga`) shows the choice and lets you force a palette or background.
+- **Separate pictures:** CGA pictures live in `C:\DESKMIND\PICSCGA` (setting `pics_cga`); the Tandy pictures in `PICS`
+  are untouched. Sync fetches CGA versions of everything on MindServer. Chats are shared: a picture from a Tandy chat
+  is downloaded in its CGA version when you click it.
+- **Qwen:** requests carry `mode=cga`, so Qwen uses `helper\prompts\*_cga.txt`: it knows it is talking to a 286 with CGA
+  and asks the generator for bold silhouettes and strong contrast.
+- **Sound:** the Tandy sound chip on a Tandy, the PC speaker anywhere else.
 
 ### Keys everywhere
 
@@ -112,7 +131,8 @@ Everything also works with the mouse (CuteMouse must be loaded).
 - Grid of thumbnails (6 per page) or a list with dates (**List/Grid** button). Arrows, PgUp/PgDn, Home/End or the scroll bar move. **Enter** or a
   double-click views full screen.
 - **Rename** changes the title (the file keeps its 8-character ID name). **Delete** removes the picture from the Tandy only.
-  **Everywhere** removes it from MindServer too.
+  **Everywhere** removes it from MindServer too. On a Tandy that also runs `/CGA`, **Everywhere** and **Rename** also change the copy in the other mode's
+  folder (`PICS` or `PICSCGA`). Other PCs keep their own copies; a delete never reaches them.
 - **Ask Qwen** opens Chat with the picture attached.
 - **Sync** downloads the pictures MindServer has and the Tandy doesn't (e.g. ones made in the Dither Lab).
 - **Slideshow** starts with the selected picture.
@@ -186,6 +206,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 | `C:\DESKMIND\DESKMIND.EXE`, `SLIDES.EXE` | The programs |
 | `C:\DESKMIND\DESKMIND.CFG` | Settings |
 | `C:\DESKMIND\PICS\<id>.TPI` | Pictures: header, prompt, thumbnail and the full 640x200 picture in one file |
+| `C:\DESKMIND\PICSCGA\<id>.TPI` | CGA pictures (CGA mode only), about 17K each |
 | `C:\DESKMIND\CHATS\<id>.TCH` | Chat transcripts (plain text) |
 | `C:\DESKMIND\README.TXT` | Short version of this guide |
 | `C:\PLAY\DESKMIND.BAT`, `SLIDES.BAT` | Launchers (made by the games project's `tools\stage.py`) |

@@ -22,8 +22,14 @@ void cfg_defaults( const char *exeDir ) {
   cfg.slide_delay = 8;
   cfg.slide_effect = 0;
   sprintf( cfg.pics, "%sPICS", exeDir );
+  sprintf( cfg.pics_cga, "%sPICSCGA", exeDir );
   sprintf( cfg.chats, "%sCHATS", exeDir );
 }
+
+int cfg_cga = 0;
+
+const char *cfg_pics( void ) { return cfg_cga ? cfg.pics_cga : cfg.pics; }
+const char *cfg_pics_other( void ) { return cfg_cga ? cfg.pics : cfg.pics_cga; }
 
 void cfg_path( char *out, const char *exeDir ) {
   sprintf( out, "%sDESKMIND.CFG", exeDir );
@@ -60,6 +66,7 @@ int cfg_load( const char *path ) {
     else if ( str_ieq( key, "slide_effect" ) ) cfg.slide_effect = n;
     else if ( str_ieq( key, "slide_shuffle" ) ) cfg.slide_shuffle = n;
     else if ( str_ieq( key, "pics" ) )         str_copy( cfg.pics, val, sizeof( cfg.pics ) );
+    else if ( str_ieq( key, "pics_cga" ) )     str_copy( cfg.pics_cga, val, sizeof( cfg.pics_cga ) );
     else if ( str_ieq( key, "chats" ) )        str_copy( cfg.chats, val, sizeof( cfg.chats ) );
   }
   fclose( f );
@@ -73,8 +80,8 @@ int cfg_save( const char *path ) {
   fprintf( f, "server=%s\nport=%u\ntoken=%s\n", cfg.server, cfg.port, cfg.token );
   fprintf( f, "sound=%d\nmode=%d\nenhance=%d\nreview=%d\ndraw_enhance=%d\n",
            cfg.sound, cfg.mode, cfg.enhance, cfg.review, cfg.draw_enhance );
-  fprintf( f, "slide_delay=%d\nslide_effect=%d\nslide_shuffle=%d\npics=%s\nchats=%s\n",
-           cfg.slide_delay, cfg.slide_effect, cfg.slide_shuffle, cfg.pics, cfg.chats );
+  fprintf( f, "slide_delay=%d\nslide_effect=%d\nslide_shuffle=%d\npics=%s\npics_cga=%s\nchats=%s\n",
+           cfg.slide_delay, cfg.slide_effect, cfg.slide_shuffle, cfg.pics, cfg.pics_cga, cfg.chats );
   int bad = ferror( f );
   fclose( f );
   return bad;

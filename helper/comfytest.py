@@ -28,8 +28,9 @@ def main():
     if not c.alive():
         print("ComfyUI is not answering on", cfg["comfy"]["url"], "- start run_comfy_image.bat first")
         return 1
-    wf, seed = c.build(prompt, steps=cfg["comfy"]["steps"], shortside=cfg["comfy"]["shortside"],
-                       lora_on=cfg["comfy"]["lora_on"], lora_strength=cfg["comfy"]["lora_strength"])
+    p = cfg.comfy_profile()
+    wf, seed = c.build(prompt, steps=p["steps"], shortside=p["shortside"],
+                       lora_on=p["lora_on"], lora_strength=p["lora_strength"])
     print(f"seed {seed}: {prompt}")
     t0 = time.time()
     img = c.run(wf, progress=lambda f, t: print(f"  {t}" + (f" ({f:.0%})" if f is not None else "")))

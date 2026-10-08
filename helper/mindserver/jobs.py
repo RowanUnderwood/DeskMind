@@ -106,12 +106,14 @@ class JobQueue:
         if self.prepare:
             self.prepare(job)
         c = cfg["comfy"]
+        p = cfg.comfy_profile()
         client = ComfyClient(c["url"], c["workflow"])
         if not client.alive():
             raise RuntimeError("ComfyUI is not running")
-        wf, seed = client.build(job.prompt, seed=job.seed if job.seed >= 0 else None, steps=c["steps"],
-                                shortside=c["shortside"], lora_on=c["lora_on"],
-                                lora_strength=c["lora_strength"])
+        wf, seed = client.build(job.prompt, seed=job.seed if job.seed >= 0 else None, steps=p["steps"],
+                                shortside=p["shortside"], lora_on=p["lora_on"],
+                                lora_strength=p["lora_strength"])
+        log.info("job %d: %s, %d steps, short side %d", job.id, c["workflow"], p["steps"], p["shortside"])
         job.seed = seed
         steps_weight = 0.9
 

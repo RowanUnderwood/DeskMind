@@ -17,6 +17,7 @@ extern int net_verbose;                  // 1 = net_init prints its steps (text 
 extern char net_token[40];               // sent as X-Token when set
 extern unsigned long net_connect_ms;     // connect timeout, default 10000
 extern void ( *net_wait_hook )( void );  // called while waiting (keep the mouse pointer alive)
+extern void ( *net_event_hook )( int );  // 1 = a connection opens, 0 = it closes (sound diagnostics)
 
 int  net_init( void );                   // 0 = ok (needs MTCPCFG + packet driver)
 void net_done( void );

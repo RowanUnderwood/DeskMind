@@ -35,12 +35,17 @@ log = logging.getLogger("mindserver.chat")
 
 CHAT_DIR = os.path.join(DATA_DIR, "chats")
 PROMPT_DIR = os.path.join(HELPER_DIR, "prompts")
-PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "vision.txt"}
+PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "vision.txt",
+           # A CGA PC (requests with mode=cga) gets its own version of each prompt
+           "chat_cga": "system_chat_cga.txt", "enhance_cga": "enhance_cga.txt", "vision_cga": "vision_cga.txt"}
 HISTORY_CHARS = 24000          # how much earlier conversation is sent along
 OLD_DRAW_NOTE = re.compile(r"\[You drew picture [0-9A-Za-z]{1,12}:[^\]]*\]", re.IGNORECASE)
 
 
-def load_prompt(name: str) -> str:
+def load_prompt(name: str, mode: str | None = None) -> str:
+    """Prompt `name`; with mode "cga" its CGA version if that file exists."""
+    if mode == "cga" and os.path.exists(os.path.join(PROMPT_DIR, PROMPTS.get(name + "_cga", "-"))):
+        name += "_cga"
     with open(os.path.join(PROMPT_DIR, PROMPTS[name]), encoding="utf-8") as f:
         return f.read().strip()
 
@@ -158,8 +163,8 @@ class ChatEngine:
 
     # ------------------------------------------------------------ helpers
 
-    def _system(self) -> str:
-        return load_prompt("chat").replace("{date}", datetime.now().strftime("%A %d %B %Y"))
+    def _system(self, mode: str | None = None) -> str:
+        return load_prompt("chat", mode).replace("{date}", datetime.now().strftime("%A %d %B %Y"))
 
     def _drawn_prompt(self, d: dict) -> str:
         """What was drawn: the saved prompt, else the picture's own (chats synced from the Tandy keep only
@@ -191,30 +196,29 @@ class ChatEngine:
             out.append({"role": m["role"], "content": t})
         return list(reversed(out))
 
-    def _vision_text(self, image_id: str, earlier: bool, two: bool) -> str:
+    def _vision_text(self, image_id: str, earlier: bool, two: bool, mode: str | None = None) -> str:
         meta = self.store.meta(image_id)
-        text = (load_prompt("vision").replace("{image_id}", image_id)
+        text = (load_prompt("vision", mode).replace("{image_id}", image_id)
                 .replace("{title}", meta.get("title", "")).replace("{prompt}", meta.get("prompt", "")))
         if not two:
             text += ("\n\nOnly one version is attached this time: the picture exists only on the Tandy, so what "
-                     "you see is the dithered 16-colour version itself.")
+                     "you see is the dithered version itself.")
         if earlier:
             text += ("\n\nThis is the picture from earlier in this conversation; it stays in view so you can "
                      "answer follow-up questions about it.")
         return text
 
-    def _vision_parts(self, image_id: str) -> tuple[list, bool]:
+    def _vision_parts(self, image_id: str, mode: str | None = None) -> tuple[list, bool]:
         """[original, what the Tandy shows] as image parts; one part if there is no separate original."""
         meta = self.store.meta(image_id)
         original = self.store.original(image_id)
         if meta.get("source") == "tandy-upload":
             return [image_part(original, png=True)], False
         s = self.config.dither_settings()
-        s.mode = meta.get("mode", s.mode)
+        s.mode = mode or meta.get("mode", s.mode)
         from . import tpi as TPI
         info = TPI.parse(self.store.tpi_bytes(image_id, s))
-        idx = D.unpack(info.image, info.width, info.height)
-        tandy = D.preview_4x3(idx, s, 1024)          # the Tandy's real pixel shape, 4:3
+        tandy = D.preview_4x3(info.image_idx(), s, 1024, info.rgb(s))   # the real pixel shape, 4:3
         return [image_part(original), image_part(tandy, 1024, png=True)], True
 
     def _recent_picture(self, chat: dict) -> str | None:
@@ -228,9 +232,9 @@ class ChatEngine:
 
     # ------------------------------------------------------------ enhancement
 
-    def enhance(self, prompt: str, emit=None) -> str:
+    def enhance(self, prompt: str, emit=None, mode: str | None = None) -> str:
         """Rewrite a picture idea into a generator prompt (streams 'S thinking' as keep-alive)."""
-        msgs = [{"role": "system", "content": load_prompt("enhance")}, {"role": "user", "content": prompt}]
+        msgs = [{"role": "system", "content": load_prompt("enhance", mode)}, {"role": "user", "content": prompt}]
         out, last = [], 0.0
         for kind, t in self.qwen.stream(msgs, self.config["qwen"]["effort_enhance"], 2500):
             if kind == "content":
@@ -244,13 +248,15 @@ class ChatEngine:
     def _prepare_job(self, job) -> None:
         if getattr(job, "enhance", False):
             self.jobs._update(job, text="enhancing prompt")
-            job.prompt = self.enhance(job.original_prompt or job.prompt)
+            job.prompt = self.enhance(job.original_prompt or job.prompt, mode=job.mode)
             log.info("job %d enhanced: %s", job.id, job.prompt)
 
     # ------------------------------------------------------------ chat reply
 
     def reply(self, chat_id: str | None, user_text: str, image_id: str | None, emit,
-              enhance_draw: bool | None = None) -> dict:
+              enhance_draw: bool | None = None, mode: str | None = None) -> dict:
+        """`mode` is the asking machine's picture mode ("cga" for a CGA PC): it picks the prompts and
+        the mode of pictures drawn in this reply.  None = the default (Tandy)."""
         user_text = user_text.strip()
         emit = TX.Coalescer(emit)
         if chat_id and self.chats.exists(chat_id):
@@ -266,7 +272,7 @@ class ChatEngine:
             emit("D")
             return chat
 
-        msgs = [{"role": "system", "content": self._system()}] + self._history(chat)
+        msgs = [{"role": "system", "content": self._system(mode)}] + self._history(chat)
         # The picture in view: the one attached now, or else the most recent one in this chat
         view_id, earlier = image_id, False
         if not view_id:
@@ -274,9 +280,9 @@ class ChatEngine:
             if recent and self.store.exists(recent):
                 view_id, earlier = recent, True
         if view_id:
-            parts, two = self._vision_parts(view_id)
+            parts, two = self._vision_parts(view_id, mode)
             # One system message only: Qwen chat templates (ThinkingCap's at least) reject a later one
-            msgs[0]["content"] += "\n\n" + self._vision_text(view_id, earlier, two)
+            msgs[0]["content"] += "\n\n" + self._vision_text(view_id, earlier, two, mode)
             content = parts + [{"type": "text", "text": user_text}]
             effort = self.config["qwen"]["effort_vision"]
         else:
@@ -321,14 +327,15 @@ class ChatEngine:
         self.chats.save(chat)
 
         if splitter.prompts:
-            self._draw(chat, amsg, splitter.prompts[0], emit, enhance_draw)
+            self._draw(chat, amsg, splitter.prompts[0], emit, enhance_draw, mode)
         emit("D")
         return chat
 
-    def _draw(self, chat: dict, amsg: dict, prompt: str, emit, enhance: bool | None) -> None:
+    def _draw(self, chat: dict, amsg: dict, prompt: str, emit, enhance: bool | None,
+              mode: str | None = None) -> None:
         if enhance is None:
             enhance = bool(self.config["qwen"].get("draw_enhance", False))
-        job = self.jobs.submit(prompt, title=make_title(prompt), enhance=enhance)
+        job = self.jobs.submit(prompt, mode, title=make_title(prompt), enhance=enhance)
         emit("S drawing 0")
         line, shown = job.line(), 0
         deadline = time.time() + 15 * 60

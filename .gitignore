@@ -33,3 +33,9 @@ screenshotsfromtandy/
 krea2_native*.json
 stdout.txt
 stderr.txt
+vm/dm_at.img
+vm/dm_at/nvr/
+vm/files/DMTEST/PICSCGA/
+
+# Workflow exports dropped here; the copies MindServer uses are in helper/workflows/
+/krea2SimpleFine_fixed*.json

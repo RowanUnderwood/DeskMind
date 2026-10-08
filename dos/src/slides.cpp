@@ -1,9 +1,10 @@
 // SLIDES - stand-alone DeskMind slideshow (no network needed, any boot mode).
 //
-//   SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE]
+//   SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/CGA]
 //
-//   folder     pictures (*.TPI); default: DeskMind's PICS folder from DESKMIND.CFG,
-//              else the current folder
+//   folder     pictures (*.TPI); default: DeskMind's PICS folder from DESKMIND.CFG
+//              (PICSCGA in CGA mode), else the current folder
+//   /CGA       CGA pictures on any PC (automatic without Tandy Video II)
 //   /D n       seconds per picture (default from DESKMIND.CFG, else 8)
 //   /E n       transition: 0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds,
 //              5 interlace, 6 dissolve, 7 box out, 8 box in, 9 slide in
@@ -43,8 +44,9 @@ static int path_of( void *, int i, char *out ) {
 }
 
 static void usage( void ) {
-  printf( "SLIDES - DeskMind slideshow for the Tandy 1000 SL/TL/RL (640x200x16)\n\n"
-          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]\n\n"
+  printf( "SLIDES - DeskMind slideshow for the Tandy 1000 SL/TL/RL (640x200x16) and CGA PCs\n\n"
+          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA]\n\n"
+          "  /CGA: CGA pictures (automatic on a PC without Tandy Video II)\n"
           "  /R: random order (or tick \"Slideshow: random order\" in DeskMind's Settings)\n"
           "  /LIST: print the play order and exit\n"
           "  /E: 0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds, 5 interlace,\n"
@@ -61,6 +63,11 @@ int main( int argc, char *argv[] ) {
   cfg_defaults( exeDir );
   cfg_path( cfgFile, exeDir );
   int haveCfg = cfg_load( cfgFile ) == 0;
+  // CGA first: it decides the default folder and which pictures count
+  int forceCga = 0;
+  for ( int i = 1; i < argc; i++ ) if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
+  cfg_cga = forceCga || vid_detect( ) != VT_SLTL;
+  tpi_cga = cfg_cga;
 
   SlideOpts o;
   o.delay = cfg.slide_delay > 0 ? cfg.slide_delay : 8;
@@ -69,7 +76,7 @@ int main( int argc, char *argv[] ) {
   o.shuffle = cfg.slide_shuffle;       // Settings: "Slideshow: random order"
   o.loop = 1;
   int bench = 0, noMouse = 0, listOnly = 0;
-  str_copy( s_dir, haveCfg ? cfg.pics : ".", sizeof( s_dir ) );
+  str_copy( s_dir, haveCfg ? cfg_pics( ) : ".", sizeof( s_dir ) );
 
   for ( int i = 1; i < argc; i++ ) {
     char *a = argv[i];
@@ -82,6 +89,7 @@ int main( int argc, char *argv[] ) {
     else if ( str_ieq( a, "/BENCH" ) ) bench = 1;
     else if ( str_ieq( a, "/LIST" ) ) listOnly = 1;
     else if ( str_ieq( a, "/NOMOUSE" ) ) noMouse = 1;
+    else if ( str_ieq( a, "/CGA" ) ) ;
     else if ( a[0] != '/' ) str_copy( s_dir, a, sizeof( s_dir ) );
     else { printf( "Unknown option %s\n\n", a ); usage( ); return 1; }
   }
@@ -90,7 +98,7 @@ int main( int argc, char *argv[] ) {
   int len = (int)strlen( s_dir );
   if ( len > 1 && s_dir[ len - 1 ] == '\\' ) s_dir[ len - 1 ] = 0;
 
-  // Find the pictures (640x200 ones), newest first
+  // Find the pictures (640x200x16 ones, or CGA ones in CGA mode), newest first
   s_e = (Entry *)malloc( sizeof( Entry ) * 500 );
   if ( !s_e ) { printf( "Out of memory\n" ); return 1; }
   struct find_t ff;
@@ -101,7 +109,7 @@ int main( int argc, char *argv[] ) {
     char p[100];
     TpiHeader h;
     sprintf( p, "%s\\%s", s_dir, ff.name );
-    if ( tpi_header( p, &h ) == 0 && h.mode == 1 ) {
+    if ( tpi_header( p, &h ) == 0 && h.mode != 2 ) {
       str_copy( s_e[s_n].name, ff.name, sizeof( s_e[0].name ) );
       s_e[s_n].when = ( (unsigned long)h.year << 20 ) | ( (unsigned long)h.month << 16 ) |
                       ( (unsigned long)h.day << 11 ) | ( h.hour << 6 ) | h.minute;
@@ -122,11 +130,11 @@ int main( int argc, char *argv[] ) {
     return 0;
   }
 
-  if ( vid_detect( ) != VT_SLTL ) { printf( "SLIDES needs a Tandy 1000 SL, TL or RL (640x200x16 video).\n" ); return 1; }
-  int r = vid_reserve( VM_640 );
+  int gmode = cfg_cga ? VM_CGA2 : VM_640;
+  int r = vid_reserve( gmode );       // nothing to reserve for CGA
   if ( r ) { printf( "Cannot use 640x200 graphics: %s\n", vid_reserve_error( r ) ); return 1; }
   if ( !noMouse ) mouse_init( );      // only for "click to quit"; its pointer stays hidden
-  vid_open( VM_640 );
+  vid_open( gmode );
   if ( bench ) {
     // Every transition once, alternating two pictures; times go to SLIDES.LOG
     static unsigned long ms[ FX_COUNT ];
@@ -136,6 +144,7 @@ int main( int argc, char *argv[] ) {
     for ( int fx = FX_CUT; fx < FX_COUNT && buf; fx++ ) {
       path_of( 0, fx % s_n, p );
       if ( tpi_image( p, buf, &h ) ) continue;
+      tpi_set_mode( &h );             // CGA: the picture's mode and palette
       unsigned long t0 = ticks( );
       slide_transition( fx, buf );
       ms[fx] = ( ticks( ) - t0 ) * 55ul;

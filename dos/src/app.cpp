@@ -52,7 +52,7 @@ void app_redraw( void ) {
 // ---------------------------------------------------------------- pictures
 
 void app_pic_path( char *out, const char *id ) {
-  sprintf( out, "%s\\%.8s.TPI", cfg.pics, id );
+  sprintf( out, "%s\\%.8s.TPI", cfg_pics( ), id );
 }
 
 int app_have_pic( const char *id ) {
@@ -61,10 +61,19 @@ int app_have_pic( const char *id ) {
   return access( p, 0 ) == 0;
 }
 
+// The same picture synced in the other mode (PICS vs PICSCGA on one Tandy)
+int app_twin_path( char *out, const char *id ) {
+  sprintf( out, "%s\\%.8s.TPI", cfg_pics_other( ), id );
+  return access( out, 0 ) == 0;
+}
+
+const char *app_pc( void ) { return cfg_cga ? "PC" : "Tandy"; }
+
 int app_need_net( const char *what ) {
   if ( app_net ) return 1;
   char t[160];
-  sprintf( t, "%s needs the network. Restart the Tandy with W (WiFi), then start DeskMind again.", what );
+  if ( cfg_cga ) sprintf( t, "%s needs the network. Start the packet driver (and WiFi), then start DeskMind again.", what );
+  else sprintf( t, "%s needs the network. Restart the Tandy with W (WiFi), then start DeskMind again.", what );
   msg_box( "No network", t, "OK" );
   return 0;
 }
@@ -81,9 +90,12 @@ int app_download_pic( const char *id ) {
   if ( !app_net ) return 1;
   char file[80], path[40];
   app_pic_path( file, id );
-  sprintf( path, "/img/%.8s", id );
+  sprintf( path, "/img/%.8s%s", id, cfg_cga ? "?mode=cga" : "" );
   int st = 0;
+  snd_settle( );
+  snd_log( SL_DISK_BEGIN, SD_DOWNLOAD );
   long n = http_get_file( cfg.server, cfg.port, path, file, dl_progress, &st );
+  snd_log( SL_DISK_END, SD_DOWNLOAD );
   return n < 0 ? 1 : 0;
 }
 
@@ -104,7 +116,8 @@ int app_view_pic( const char *id ) {
   if ( !app_have_pic( id ) ) {
     char t[160];
     if ( !app_net ) {
-      msg_box( "Picture", "This picture is not on the Tandy yet. Restart with W (WiFi) to download it.", "OK" );
+      sprintf( t, "This picture is not on this %s yet. Start the network to download it.", app_pc( ) );
+      msg_box( "Picture", t, "OK" );
       return 1;
     }
     app_status( "Downloading the picture..." );
@@ -118,15 +131,24 @@ int app_view_pic( const char *id ) {
   gui_mouse_hide( );
   int rc = tpi_show( p );
   if ( rc ) {
+    if ( app_gui_mode( ) ) app_redraw( );
     gui_mouse_show( );
     msg_box( "Picture", "Could not show this picture.", "OK" );
     return rc;
   }
   Event e;
   do { gui_poll( &e ); } while ( e.type != EV_KEY && e.type != EV_DOWN );
+  app_gui_mode( );
   gui_mouse_show( );
   app_redraw( );
   return 0;
+}
+
+int app_gui_mode( void ) {
+  // CGA: pictures may have switched to 320x200x4; the GUI lives in 640x200x2
+  if ( !vid_is_cga( ) || vid_mode == VM_CGA2 ) return 0;
+  vid_switch( VM_CGA2 );
+  return 1;
 }
 
 // ---------------------------------------------------------------- server
@@ -149,6 +171,22 @@ int app_ping( void ) {
   app_server.qwen = strstr( buf, "qwen up" ) != 0;
   app_server.comfy = strstr( buf, "comfy up" ) != 0;
   return app_server.ok ? 0 : 1;
+}
+
+int app_post_short( const char *path, const char *body ) {
+  // Short connect timeout: a stopped MindServer must answer "no" in seconds, not freeze the screen
+  unsigned long save = net_timeout_ms, saveConn = net_connect_ms;
+  net_timeout_ms = 8000;
+  net_connect_ms = 3000;
+  int st = NET_ERROR;
+  if ( http_open( cfg.server, cfg.port, "POST", path, body, body ? (unsigned)strlen( body ) : 0,
+                  body ? "text/plain" : 0 ) == 0 ) {
+    while ( ( st = http_headers( ) ) == NET_AGAIN ) ;
+    http_close( );
+  }
+  net_timeout_ms = save;
+  net_connect_ms = saveConn;
+  return st;
 }
 
 void app_menu_status( void ) {
@@ -254,13 +292,13 @@ void app_about( void ) {
   r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
-  sprintf( t, "DeskMind 0.7 for the Tandy 1000 TL/3. Chat with Qwen and draw with Krea 2 through "
-              "MindServer at %s:%u. This Tandy: %s. Free memory %uK, EMS %dK. "
+  sprintf( t, "DeskMind 0.8.3 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen and draw with Krea 2 through "
+              "MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK. "
               "Built with Open Watcom and mTCP (GPLv3). "
               "Limits: the Gallery shows the newest 500 pictures, Chats lists the newest 100. "
               "A chat holds about 40,000 characters (300 messages); then Continue hides the "
               "older part, which stays saved.",
-           cfg.server, cfg.port, ip, r.w.bx / 64, app_ems * 16 );
+           cfg_cga ? " (CGA mode now)" : "", cfg.server, cfg.port, app_pc( ), ip, r.w.bx / 64, app_ems * 16 );
   msg_box( "About DeskMind", t, "OK" );
 }
 
@@ -284,11 +322,11 @@ static void scan_pictures( void ) {
   if ( !s_pick ) return;
   struct find_t ff;
   char pattern[80];
-  sprintf( pattern, "%s\\*.TPI", cfg.pics );
+  sprintf( pattern, "%s\\*.TPI", cfg_pics( ) );
   unsigned rc = _dos_findfirst( pattern, _A_NORMAL, &ff );
   while ( rc == 0 ) {
     char path[80];
-    sprintf( path, "%s\\%s", cfg.pics, ff.name );
+    sprintf( path, "%s\\%s", cfg_pics( ), ff.name );
     TpiHeader h;
     if ( tpi_header( path, &h ) == 0 ) {
       unsigned long when = ( (unsigned long)h.year << 20 ) | ( (unsigned long)h.month << 16 ) |

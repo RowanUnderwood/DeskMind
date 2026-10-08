@@ -233,7 +233,7 @@ static void draw_row( int r ) {
     int tw = 160, th = 50;
     unsigned char far *px = thumb( id, &tw, &th );
     int tx = TEXT_X + GUTTER * 8;
-    if ( px ) vid_blit( tx, y, tw, ROW_H, px + d.sub * ROW_H * ( tw / 2 ), tw / 2 );
+    if ( px ) vid_blit( tx, y, tw, ROW_H, px + d.sub * ROW_H * tpi_thumb_pitch( tw ), tpi_thumb_pitch( tw ) );
     else vid_fill( tx, y, 160, ROW_H, DGRAY );
     // caption to the right of the thumbnail
     int cx = ( tx + 168 - TEXT_X ) / 8;
@@ -340,7 +340,7 @@ static void chat_file( char *out, const char *id ) {
 // (8 MHz tests: the 512-byte default buffers and a seek per line made a long chat take 30 s).
 static char s_fbuf[ 4096 ];
 
-static void save_chat( void ) {
+static void save_chat_disk( void ) {
   if ( !s_chatId[0] ) return;
   mkdir( cfg.chats );
   char path[80];
@@ -386,6 +386,14 @@ static void save_chat( void ) {
     chsize( fileno( f ), s_end );             // (only matters if the file was longer)
   }
   fclose( f );
+}
+
+// The disk functions are marked in the sound log (the stuck-note hunt) and wait for a
+// playing sound to end first: the real TL/3 sometimes held a note through disk work.
+static void save_chat( void ) {
+  snd_settle( ); snd_log( SL_DISK_BEGIN, SD_CHAT_SAVE );
+  save_chat_disk( );
+  snd_log( SL_DISK_END, SD_CHAT_SAVE );
 }
 
 static void clear_chat( void ) {
@@ -530,7 +538,7 @@ static void parse_from( FILE *f, long at ) {
   }
 }
 
-static int load_chat( const char *id ) {
+static int load_chat_disk( const char *id ) {
   char path[80];
   chat_file( path, id );
   FILE *f = fopen( path, "rb" );
@@ -582,6 +590,13 @@ static int load_chat( const char *id ) {
   return 0;
 }
 
+static int load_chat( const char *id ) {
+  snd_settle( ); snd_log( SL_DISK_BEGIN, SD_CHAT_LOAD );
+  int rc = load_chat_disk( id );
+  snd_log( SL_DISK_END, SD_CHAT_LOAD );
+  return rc;
+}
+
 // ---------------------------------------------------------------- chat list dialog
 
 struct ChatEntry { char id[9]; char title[48]; unsigned long when; };
@@ -596,7 +611,7 @@ static int cmp_chat( const void *a, const void *b ) {
 
 static const char far *chat_item( void *, int i ) { return s_list[i].title; }
 
-static void scan_chats( void ) {
+static void scan_chats_disk( void ) {
   if ( !s_list ) s_list = (ChatEntry *)malloc( sizeof( ChatEntry ) * MAX_CHATS );
   s_nlist = s_nchats = 0;
   if ( !s_list ) return;
@@ -641,6 +656,12 @@ static void scan_chats( void ) {
   qsort( s_list, s_nlist, sizeof( ChatEntry ), cmp_chat );
 }
 
+static void scan_chats( void ) {
+  snd_settle( ); snd_log( SL_DISK_BEGIN, SD_CHAT_LIST );
+  scan_chats_disk( );
+  snd_log( SL_DISK_END, SD_CHAT_LIST );
+}
+
 static void sync_to_server( void ) {
   if ( !app_net || !s_chatId[0] ) return;
   char file[80], path[40];
@@ -663,8 +684,8 @@ static void chats_dialog( void ) {
   Form f;
   unsigned char far *save = ui_save( x, y, w + 6, h + 3 );
   static char ft[60];
-  if ( s_nchats > s_nlist ) sprintf( ft, "Chats on this Tandy (newest %d of %d)", s_nlist, s_nchats );
-  else strcpy( ft, "Chats on this Tandy" );
+  if ( s_nchats > s_nlist ) sprintf( ft, "Chats on this %s (newest %d of %d)", app_pc( ), s_nlist, s_nchats );
+  else sprintf( ft, "Chats on this %s", app_pc( ) );
   form_init( &f, ft, x, y, w, h, ws, 5 );
   form_draw( &f );
   int r;
@@ -765,6 +786,7 @@ static void send_message( void ) {
   sprintf( path, "/chat?id=%s", s_chatId );
   if ( s_attach[0] ) sprintf( path + strlen( path ), "&img=%s", s_attach );
   if ( cfg.draw_enhance >= 0 ) sprintf( path + strlen( path ), "&draw_enhance=%d", cfg.draw_enhance ? 1 : 0 );
+  if ( cfg_cga ) strcat( path, "&mode=cga" );              // CGA prompts, pictures drawn for CGA
   static char body[ 400 ];
   str_copy( body, s_input, sizeof( body ) );
   s_input[0] = 0; s_ws[0].cur = 0; s_ws[0].top = 0;

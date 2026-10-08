@@ -67,7 +67,7 @@ static char s_enhErr[ 300 ];
 static int enhance( const char *idea, char *out, unsigned size ) {
   static char line[ 1200 ];
   s_enhErr[0] = 0;
-  if ( http_open( cfg.server, cfg.port, "POST", "/enhance", idea, (unsigned)strlen( idea ), "text/plain" ) ) {
+  if ( http_open( cfg.server, cfg.port, "POST", cfg_cga ? "/enhance?mode=cga" : "/enhance", idea, (unsigned)strlen( idea ), "text/plain" ) ) {
     str_copy( s_enhErr, net_error( ), sizeof( s_enhErr ) );
     return 0;
   }
@@ -103,7 +103,7 @@ static int enhance( const char *idea, char *out, unsigned size ) {
 static int generate( const char *prompt, const char *title, char *id9, char *titleOut ) {
   static char path[ 200 ], enc[ 130 ], line[ 300 ];
   url_encode( enc, sizeof( enc ), title );
-  sprintf( path, "/gen?mode=640&title=%s", enc );
+  sprintf( path, "/gen?mode=%s&title=%s", cfg_cga ? "cga" : "640", enc );
   static char buf[ 64 ];
   if ( http_open( cfg.server, cfg.port, "POST", path, prompt, (unsigned)strlen( prompt ), "text/plain" ) ) {
     progress_end( ); msg_box( "Create", net_error( ), "OK" ); return 0;

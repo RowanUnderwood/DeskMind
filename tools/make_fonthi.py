@@ -1,0 +1,95 @@
+"""Generate dos/src/fonthi.cpp: an 8x8 font for CP437 characters 128-255.
+
+The BIOS font at F000:FA6E has only characters 0-127.  The upper half comes from
+INT 1Fh, which a Tandy BIOS sets but a plain PC/AT leaves empty (GRAFTABL fills it),
+so on a CGA PC accented letters, bullets and box characters came out as '?'.
+
+Glyphs come from font8x8 by Daniel Hepper (public domain, tools/dl/font8x8), looked
+up by each CP437 character's Unicode code point; the few it lacks are drawn below.
+
+    python tools/make_fonthi.py
+"""
+
+import os
+import re
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "dl", "font8x8")
+OUT = os.path.join(HERE, "..", "dos", "src", "fonthi.cpp")
+
+
+def load_tables() -> dict[int, list[int]]:
+    glyphs = {}
+    pat = re.compile(r"\{\s*((?:0x[0-9A-Fa-f]{2}\s*,\s*){7}0x[0-9A-Fa-f]{2})\s*\}\s*,?\s*//\s*U\+([0-9A-Fa-f]{4})")
+    for name in ("font8x8_basic.h", "font8x8_control.h", "font8x8_ext_latin.h", "font8x8_greek.h",
+                 "font8x8_box.h", "font8x8_block.h", "font8x8_misc.h"):
+        with open(os.path.join(SRC, name), encoding="utf-8") as f:
+            for m in pat.finditer(f.read()):
+                rows = [int(v, 16) for v in m.group(1).replace(" ", "").split(",")]
+                # font8x8: least significant bit = leftmost pixel; ours: most significant
+                glyphs.setdefault(int(m.group(2), 16), [int(f"{r:08b}"[::-1], 2) for r in rows])
+    return glyphs
+
+
+def art(*rows: str) -> list[int]:
+    assert len(rows) == 8 and all(len(r) == 8 for r in rows)
+    return [int(r.replace(".", "0").replace("#", "1"), 2) for r in rows]
+
+
+# Drawn here: characters font8x8 doesn't have (by Unicode code point)
+EXTRA = {
+    0x2302: art("........", "...#....", "..#.#...", ".#...#..", ".#...#..", ".#####..", "........", "........"),  # ⌂
+    0x0192: art("....##..", "...#..#.", "...#....", ".#####..", "...#....", "...#....", "#..#....", ".##....."),  # ƒ
+    0x20A7: art("###.....", "#..#....", "#..#.#..", "###.###.", "#....#..", "#....#.#", "#.....#.", "........"),  # ₧
+    0x2310: art("........", "........", "######..", "#.......", "#.......", "........", "........", "........"),  # ⌐
+    0x2261: art("........", "######..", "........", "######..", "........", "######..", "........", "........"),  # ≡
+    0x00B1: art("..##....", "..##....", "######..", "..##....", "..##....", "........", "######..", "........"),  # ±
+    0x2265: art(".##.....", "...##...", ".....##.", "...##...", ".##.....", "........", "######..", "........"),  # ≥
+    0x2264: art(".....##.", "...##...", ".##.....", "...##...", ".....##.", "........", "######..", "........"),  # ≤
+    0x2320: art(".....##.", "....#..#", "....#...", "....#...", "....#...", "....#...", "....#...", "....#..."),  # ⌠
+    0x2321: art("...#....", "...#....", "...#....", "...#....", "...#....", "#..#....", ".##.....", "........"),  # ⌡
+    0x00F7: art("........", "..##....", "........", "######..", "........", "..##....", "........", "........"),  # ÷
+    0x2248: art("........", ".##.#...", "#.##....", "........", ".##.#...", "#.##....", "........", "........"),  # ≈
+    0x00B0: art("..###...", ".##.##..", ".##.##..", "..###...", "........", "........", "........", "........"),  # °
+    0x2219: art("........", "........", "........", "...##...", "...##...", "........", "........", "........"),  # ∙
+    0x00B7: art("........", "........", "........", "...#....", "........", "........", "........", "........"),  # ·
+    0x221A: art("....####", "....#...", "....#...", "....#...", "###.#...", ".#.##...", "..###...", "...##..."),  # √
+    0x207F: art("####....", ".##.##..", ".##.##..", ".##.##..", "........", "........", "........", "........"),  # ⁿ
+    0x00B2: art(".###....", "...##...", "..##....", ".####...", "........", "........", "........", "........"),  # ²
+    0x25A0: art("........", "........", "..####..", "..####..", "..####..", "..####..", "........", "........"),  # ■
+    0x00A0: [0] * 8,                                                                                                 # no-break space
+    0x221E: art("........", "........", ".##.##..", "#..#..#.", "#..#..#.", ".##.##..", "........", "........"),  # ∞
+    0x2229: art("........", "..###...", ".##.##..", ".##.##..", ".##.##..", ".##.##..", "........", "........"),  # ∩
+    0x03C6: art("........", "......#.", "..####..", ".#.#.##.", ".##.#.#.", "..####..", ".#......", "........"),  # φ
+}
+
+
+def main() -> None:
+    glyphs = load_tables()
+    glyphs.update(EXTRA)
+    rows, missing = [], []
+    for code in range(128, 256):
+        ch = bytes([code]).decode("cp437")
+        g = glyphs.get(ord(ch))
+        if g is None:
+            missing.append(f"{code:02X} {ch} U+{ord(ch):04X}")
+            g = glyphs[ord("?")]
+        rows.append((code, ch, g))
+    if missing:
+        raise SystemExit("no glyph for: " + ", ".join(missing))
+    lines = ["// DeskMind - 8x8 font for CP437 characters 128-255 (used when INT 1Fh is empty).",
+             "// Generated by tools/make_fonthi.py from font8x8 by Daniel Hepper (public domain);",
+             "// do not edit by hand.  Rows top to bottom, most significant bit = leftmost pixel.",
+             "",
+             "extern const unsigned char font_hi[ 128 * 8 ] = {"]
+    for code, ch, g in rows:
+        name = f"U+{ord(ch):04X}"
+        lines.append("  " + ", ".join(f"0x{b:02X}" for b in g) + f",   // {code:02X} {name}")
+    lines.append("};")
+    with open(OUT, "w", encoding="ascii", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"wrote {OUT}: 128 glyphs")
+
+
+if __name__ == "__main__":
+    main()

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox,
 
 from . import dither as D
 from . import tpi
+from .comfy import ComfyClient, ComfyError, list_workflows
 from .config import HELPER_DIR, PROJECT_DIR, Config
 from .server import VERSION, MindServer
 from .services import ninfer_mismatch, ninfer_running
@@ -244,15 +245,20 @@ class GenerationTab(QWidget):
         box = QGroupBox("ComfyUI settings")
         f = QFormLayout(box)
         self.url = QLineEdit(c["url"])
-        self.workflow = QLineEdit(c["workflow"])
-        self.steps = QSpinBox(); self.steps.setRange(1, 60); self.steps.setValue(c["steps"])
+        self.workflow = QComboBox()
+        self.workflow.setToolTip("API-format workflows in helper\\workflows. Steps, size and LoRA are kept per workflow.\n"
+                                 "The choice applies to everything: this tab, Create on the Tandy and drawings in chat.")
+        reload_wf = QPushButton("Reload list")
+        reload_wf.clicked.connect(self.load_workflows)
+        wrow = QHBoxLayout(); wrow.addWidget(self.workflow, 1); wrow.addWidget(reload_wf)
+        self.wf_note = QLabel(""); self.wf_note.setWordWrap(True); self.wf_note.setStyleSheet("color: #a60")
+        self.steps = QSpinBox(); self.steps.setRange(1, 60)
         self.shortside = QSpinBox(); self.shortside.setRange(384, 2048); self.shortside.setSingleStep(64)
-        self.shortside.setValue(c["shortside"])
-        self.lora_on = QCheckBox("KNPV3_1 LoRA on"); self.lora_on.setChecked(c["lora_on"])
+        self.lora_on = QCheckBox("KNPV3_1 LoRA on")
         self.lora_strength = QDoubleSpinBox(); self.lora_strength.setRange(0, 2); self.lora_strength.setSingleStep(0.1)
-        self.lora_strength.setValue(c["lora_strength"])
         f.addRow("URL", self.url)
-        f.addRow("Workflow", self.workflow)
+        f.addRow("Workflow", wrow)
+        f.addRow(self.wf_note)
         f.addRow("Steps", self.steps)
         f.addRow("Short side (px)", self.shortside)
         f.addRow(self.lora_on)
@@ -268,7 +274,7 @@ class GenerationTab(QWidget):
         self.prompt.setMaximumHeight(90)
         tl.addWidget(self.prompt)
         row = QHBoxLayout()
-        self.mode = QComboBox(); self.mode.addItems(["640", "320"])
+        self.mode = QComboBox(); self.mode.addItems(["640", "320", "cga"])
         self.mode.setCurrentText(win.config["dither"]["mode"])
         self.go = QPushButton("Generate")
         self.go.clicked.connect(self.generate)
@@ -288,14 +294,61 @@ class GenerationTab(QWidget):
         self.preview.setStyleSheet("background: #111; color: #888")
         lay.addWidget(self.preview, 2)
         self.job_id = None
+        self.shown_wf = None                    # workflow whose profile the fields show
+        self.workflow.currentIndexChanged.connect(self.workflow_changed)
+        self.load_workflows()
+
+    def load_workflows(self):
+        """Fill the dropdown from helper/workflows (keeps the active one even if it isn't usable)."""
+        active = self.win.config["comfy"]["workflow"]
+        ok, bad = list_workflows()
+        names = ok if active in ok else ok + [active]
+        self.workflow.blockSignals(True)
+        self.workflow.clear()
+        for name in names:
+            self.workflow.addItem(os.path.basename(name), name)
+        self.workflow.setCurrentIndex(names.index(active))
+        self.workflow.blockSignals(False)
+        for name, why in bad.items():
+            log.warning("workflow %s not usable: %s", name, why)
+        self.show_profile(active)
+
+    def show_profile(self, workflow: str):
+        """Put a workflow's steps/size/LoRA into the fields and say whether it can be used."""
+        p = self.win.config.comfy_profile(workflow)
+        self.steps.setValue(p["steps"])
+        self.shortside.setValue(p["shortside"])
+        self.lora_on.setChecked(p["lora_on"])
+        self.lora_strength.setValue(p["lora_strength"])
+        note, lora = "", False
+        try:
+            lora = ComfyClient(self.url.text().strip(), workflow).has_lora()
+        except (OSError, ValueError, ComfyError) as e:
+            note = f"Can't use this workflow: {e}"
+        self.wf_note.setText(note)
+        self.wf_note.setVisible(bool(note))
+        self.lora_on.setEnabled(lora)
+        self.lora_strength.setEnabled(lora)
+        self.lora_on.setToolTip("" if lora else "This workflow has no Power Lora Loader node")
+        self.shown_wf = workflow
+
+    def workflow_changed(self, _index):
+        if self.shown_wf:
+            self.save()                         # keep the fields with the workflow they were shown for
+        new = self.workflow.currentData()
+        self.show_profile(new)
+        self.save()
+        log.info("workflow now %s", new)
 
     def save(self):
         c = self.win.config["comfy"]
-        c.update(url=self.url.text().strip(), workflow=self.workflow.text().strip(), steps=self.steps.value(),
-                 shortside=self.shortside.value(), lora_on=self.lora_on.isChecked(),
-                 lora_strength=round(self.lora_strength.value(), 2))
+        wf = self.shown_wf or c["workflow"]
+        c.update(url=self.url.text().strip(), workflow=wf)
+        self.win.config.set_comfy_profile(wf, steps=self.steps.value(), shortside=self.shortside.value(),
+                                          lora_on=self.lora_on.isChecked(),
+                                          lora_strength=round(self.lora_strength.value(), 2))
         self.win.config.save()
-        log.info("generation settings saved")
+        log.info("generation settings saved (%s)", wf)
 
     def generate(self):
         self.save()
@@ -317,8 +370,8 @@ class GenerationTab(QWidget):
         if job.status == "done":
             data = self.win.server.store.tpi_bytes(job.image_id)
             info = tpi.parse(data)
-            idx = D.unpack(info.image, info.width, info.height)
-            self.preview.setPixmap(to_pixmap(D.preview_4x3(idx, self.win.config.dither_settings(), 640)))
+            s = self.win.config.dither_settings()
+            self.preview.setPixmap(to_pixmap(D.preview_4x3(info.image_idx(), s, 640, info.rgb(s))))
             self.win.gallery.refresh()
 
 
@@ -352,7 +405,7 @@ class DitherLabTab(QWidget):
 
         box = QGroupBox("Settings")
         f = QFormLayout(box)
-        self.mode = QComboBox(); self.mode.addItems(["640", "320"])
+        self.mode = QComboBox(); self.mode.addItems(["640", "320", "cga"])
         self.fit = QComboBox(); self.fit.addItems(["crop", "letterbox", "stretch"])
         self.engine = QComboBox(); self.engine.addItems(D.ENGINES)
         self.method = QComboBox()
@@ -366,11 +419,17 @@ class DitherLabTab(QWidget):
         self.gamma = slider(40, 250, 100)
         self.sharpen = slider(0, 200, 60)
         self.brown = QCheckBox("colour 6 = brown (off: dark yellow)")
+        self.cga = QComboBox(); self.cga.addItems(D.CGA_CHOICES)
+        self.cga.setToolTip("Mode cga: auto picks 320x200 with the best palette and background, "
+                            "or 640x200 black and white")
+        self.cga_bg = QComboBox(); self.cga_bg.addItems(["auto"] + D.COLOUR_NAMES)
+        self.cga_mode5 = QCheckBox("allow the mode-5 cyan/red palettes")
         for label, w in [("Mode", self.mode), ("Fit to 4:3", self.fit), ("Engine", self.engine),
                          ("Method", self.method), ("Matrix order", self.order), ("Threshold", self.threshold),
                          ("Strength", self.strength), ("", self.serpentine), ("Brightness", self.brightness),
                          ("Contrast", self.contrast), ("Saturation", self.saturation), ("Gamma", self.gamma),
-                         ("Sharpen", self.sharpen), ("", self.brown)]:
+                         ("Sharpen", self.sharpen), ("", self.brown), ("CGA palette", self.cga),
+                         ("CGA background", self.cga_bg), ("", self.cga_mode5)]:
             f.addRow(label, w)
         ctl.addWidget(box)
 
@@ -419,12 +478,12 @@ class DitherLabTab(QWidget):
         lay.addLayout(view, 1)
 
         self.engine.currentTextChanged.connect(self.fill_methods)
-        for w in (self.mode, self.fit, self.engine, self.method):
+        for w in (self.mode, self.fit, self.engine, self.method, self.cga, self.cga_bg):
             w.currentTextChanged.connect(self.changed)
         for w in (self.order, self.threshold, self.strength, self.brightness, self.contrast,
                   self.saturation, self.gamma, self.sharpen):
             w.valueChanged.connect(self.changed)
-        for w in (self.serpentine, self.brown, self.show_pixels):
+        for w in (self.serpentine, self.brown, self.cga_mode5, self.show_pixels):
             w.toggled.connect(self.changed)
         self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(250)
         self.debounce.timeout.connect(self.render)
@@ -458,7 +517,9 @@ class DitherLabTab(QWidget):
             strength=self.strength.value() / 100, serpentine=self.serpentine.isChecked(),
             brightness=self.brightness.value() / 100, contrast=self.contrast.value() / 100,
             saturation=self.saturation.value() / 100, gamma=self.gamma.value() / 100,
-            sharpen=self.sharpen.value() / 100, brown=self.brown.isChecked())
+            sharpen=self.sharpen.value() / 100, brown=self.brown.isChecked(),
+            cga_choice=self.cga.currentText(), cga_bg=self.cga_bg.currentIndex() - 1,
+            cga_mode5=self.cga_mode5.isChecked())
 
     def load_settings(self, s: D.DitherSettings):
         self._loading = True
@@ -469,6 +530,9 @@ class DitherLabTab(QWidget):
         self.brightness.setValue(round(s.brightness * 100)); self.contrast.setValue(round(s.contrast * 100))
         self.saturation.setValue(round(s.saturation * 100)); self.gamma.setValue(round(s.gamma * 100))
         self.sharpen.setValue(round(s.sharpen * 100)); self.brown.setChecked(s.brown)
+        self.cga.setCurrentText(s.cga_choice if s.cga_choice in D.CGA_CHOICES else "auto")
+        self.cga_bg.setCurrentIndex(s.cga_bg + 1 if 0 <= s.cga_bg <= 15 else 0)
+        self.cga_mode5.setChecked(s.cga_mode5)
         self._loading = False
         self.changed()
 
@@ -519,8 +583,8 @@ class DitherLabTab(QWidget):
 
         def work():
             t0 = time.perf_counter()
-            idx = D.convert(src, s)
-            return idx, s, time.perf_counter() - t0
+            d = D.render(src, s)
+            return d, s, time.perf_counter() - t0
 
         self._task = Task(work)             # keep it alive until its signal is delivered
         self._task.setAutoDelete(False)
@@ -532,12 +596,12 @@ class DitherLabTab(QWidget):
         if error:
             self.timing.setText(f"Error: {error}")
         else:
-            idx, s, dt = result
-            self.tandy.setPixmap(to_pixmap(D.preview_4x3(idx, s, 480)))
-            used = len(set(idx.flatten().tolist()))
-            self.timing.setText(f"{dt * 1000:.0f} ms, {used} of 16 colours")
+            d, s, dt = result
+            self.tandy.setPixmap(to_pixmap(D.preview_4x3(d.idx, s, 480, d.rgb)))
+            used = len(set(d.idx.flatten().tolist()))
+            self.timing.setText(f"{dt * 1000:.0f} ms, {used} of {len(d.rgb)} colours\n{d.describe()}")
             if self.show_pixels.isChecked():
-                raw = D.to_rgb(idx, s)
+                raw = D.to_rgb(d.idx, s, d.rgb)
                 self.pixels.setPixmap(to_pixmap(raw.resize((raw.width * 2, raw.height * 2), Image.Resampling.NEAREST)))
                 self.pixels.adjustSize()
             else:
@@ -556,7 +620,12 @@ class DitherLabTab(QWidget):
             self.load_settings(D.DitherSettings.from_dict(self.presets[name]))
 
     def save_default(self):
-        self.win.config.data["dither"] = self.settings().to_dict()
+        d = self.settings().to_dict()
+        if d["mode"] == "cga":
+            # The default mode is what requests without ?mode= get (the Tandy's): keep it a Tandy mode.
+            # CGA DeskMind always asks with mode=cga, so its settings still apply.
+            d["mode"] = self.win.config["dither"]["mode"]
+        self.win.config.data["dither"] = d
         self.win.config.save()
         st = self.win.server.store
         for m in st.list():
@@ -614,7 +683,8 @@ class GalleryTab(QWidget):
         for m in st.list():
             try:
                 info = tpi.parse(st.tpi_bytes(m["id"]))
-                th = D.to_rgb(D.unpack(info.thumb, info.thumb_w, info.thumb_h), self.win.config.dither_settings())
+                s = self.win.config.dither_settings()
+                th = D.to_rgb(info.thumb_idx(), s, info.thumb_rgb(s))
                 icon = QIcon(to_pixmap(th.resize((160, 120), Image.Resampling.NEAREST)))
             except Exception:
                 icon = QIcon()
@@ -776,7 +846,7 @@ class AITab(QWidget):
         pl = QVBoxLayout(pb)
         row = QHBoxLayout()
         self.which = QComboBox()
-        self.which.addItems(["chat", "enhance", "vision"])
+        self.which.addItems(["chat", "enhance", "vision", "chat_cga", "enhance_cga", "vision_cga"])
         self.which.currentTextChanged.connect(self.load_prompt)
         b_save = QPushButton("Save prompt"); b_save.clicked.connect(self.save_prompt)
         row.addWidget(QLabel("Prompt:")); row.addWidget(self.which); row.addStretch(); row.addWidget(b_save)

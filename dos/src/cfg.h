@@ -16,10 +16,15 @@ struct DmConfig {
   int  slide_effect;       // slideshow transition (0 = random)
   int  slide_shuffle;      // slideshow in random order
   char pics[64];           // picture folder, e.g. C:\DESKMIND\PICS
+  char pics_cga[64];       // picture folder in CGA mode (CGA pictures only), e.g. C:\DESKMIND\PICSCGA
   char chats[64];          // chat folder
 };
 
 extern DmConfig cfg;
+extern int cfg_cga;                        // 1 = this run uses CGA (set at startup, not saved)
+
+const char *cfg_pics( void );              // the picture folder for this run
+const char *cfg_pics_other( void );        // the other mode's folder (PICSCGA or PICS)
 
 void cfg_defaults( const char *exeDir );
 int  cfg_load( const char *path );         // 0 = ok, missing file keeps defaults

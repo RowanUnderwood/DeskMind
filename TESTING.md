@@ -1,5 +1,66 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 8.3: DeskMind 0.8.3, stuck sounds: the real cause
+
+**Found (in 86Box):** the timer code that plays sounds read its settings through the wrong segment whenever the tick
+interrupted DOS, the disk or the network driver. At the end of a sound it then sometimes "silenced" the PC speaker
+instead of the Tandy chip, so the last note kept ringing until the next sound. The same bug made the 86Box Tandy crash
+during disk writes. 0.8.3 is built so that this code can't make that mistake. Details: CLAUDE.md, 0.8.3.
+
+1. Use DeskMind normally, W boot, for a good while: Chat (open chats, replies, drawings), Gallery (Delete, Sync),
+   Picture. **No note should hang any more**, and no click should run long.
+2. If one ever does: press **F9** (up to four times) while it rings. Each press says what it did on the status line and
+   appends to `C:\DESKMIND\SOUND.LOG`. Note which press stopped it, and if none did, unplug the PicoMEM audio jack.
+   Bring the card back (or the log).
+3. Optional: `CD \DMTEST`, `SNDTEST /D /N 192.168.2.192` (your MindServer's IP): sounds with disk and network load.
+   `miss` should stay 0, and nothing should stick in the LISTEN pauses. Esc writes `SNDTEST.LOG`.
+
+## Round 8.2: DeskMind 0.8.2, stuck sounds (SNDTEST)
+
+0.8.2 paces every write to the sound chip and rewrites all four volumes on every timer tick, so a lost write
+should last 55 ms at most. `C:\DMTEST\SNDTEST.EXE` checks the cause on the real machine.
+
+1. `CD \DMTEST`, `SNDTEST`. It plays DeskMind's sounds in random order, often cutting into each other. After every
+   40 sounds the line says **LISTEN: quiet now** for 1.5 s: any tone you hear then is a stuck note.
+2. Keys: **0** = old chip writes (as in 0.8.1), **1** = paced writes, **2** = paced + refresh (0.8.2, the default),
+   **D** = disk load on/off, **Esc** = quit. Run each mode for about 10 rounds with D off, then again with D on.
+3. Do it once after a normal boot and once after a **W** boot (WiFi).
+4. Report per mode: stuck notes yes/no (and roughly how often), D on/off, normal/W boot.
+5. Then use DeskMind normally for a while (Chat, replies, Delete, Picture, Sync): no note should hang.
+
+## Round 8.1: DeskMind 0.8.1, Sync chime and both picture folders
+
+W boot.
+
+1. **Sync chime**: make a picture or two in `DESKMIND /CGA` (Create), exit, start `DESKMIND`, Gallery, **Sync**. The
+   chime plays once the Gallery has redrawn and **stops by itself** (well under a second). Then the reverse: a picture
+   made in normal mode, synced in `/CGA`. If a note still hangs, say for how long, and whether it stopped on its own.
+2. **Rename both**: rename a picture that you have in both modes. The status line says "Renamed." (it used to be
+   overwritten at once). The other mode shows the new title too.
+3. **Delete Everywhere both**: delete that picture with Everywhere. The status line says "... here, in the CGA
+   pictures and on MindServer" (or "Tandy pictures" from `/CGA`), and it's gone in the other mode as well.
+   Plain **Delete** still removes only this mode's copy.
+
+## Round 8: DeskMind 0.8, Delete Everywhere fix and CGA mode
+
+MindServer must run the 2026-10-04 code (restart it once). W boot.
+
+1. **Delete Everywhere with MindServer stopped**: Gallery, pick a picture, Delete, Everywhere. Within about 3 s a box
+   says MindServer didn't answer and offers "Delete here" or "Cancel". Cancel keeps the picture. With MindServer
+   running, Everywhere deletes it on both and Sync does not bring it back.
+2. **Normal mode still the same**: `DESKMIND` looks and works as in 0.7 (16 colours).
+3. **CGA mode**: `DESKMIND /CGA`. Black-and-white screen; the menus, dialogs (F5: the check marks) and pointer work.
+   The Gallery is empty at first (CGA pictures live in `PICSCGA`): press **Sync**. It fetches CGA versions of every
+   picture (about 17K each; MindServer makes each one the first time, so expect a minute or two).
+4. **CGA pictures**: view several. Each shows in its own palette (green/red/brown, cyan/magenta/grey, cyan/red/grey,
+   with a coloured background sometimes) or in 640x200 black and white, and the screen comes back to the GUI after.
+   Compare with MindServer's Dither Lab (mode `cga`) for the same picture. **Report any picture whose colours differ
+   from the Dither Lab**: the Tandy's CGA palettes are emulated, and the cyan/red ones (mode 5) are the most likely to differ.
+5. **CGA chat and create**: ask "Which PC is this?" (Qwen should describe a 286 with CGA), ask for a drawing, and
+   make one with Create. Both should look bold and simple and arrive in CGA.
+6. **Slideshows**: F6 in CGA mode, and `SLIDES /CGA` from DOS. Pictures change mode and palette as they come up.
+7. Exit, then `DESKMIND` again (no /CGA): the 16-colour pictures are all still there.
+
 ## Round 7: DeskMind 0.7 (Phase 7), from any prompt
 
 1. Type `MENU`: the APPLICATIONS section lists DESKMIND and SLIDES. Type `DESKMIND` from `C:\` (W boot): it starts,

@@ -155,7 +155,7 @@ def h_test_echo(h: Handler):
 def h_test_image(h: Handler):
     """The first sample image through the current dither settings."""
     mode = h._query().get("mode", "640")
-    if mode not in D.MODES:
+    if mode not in ("640", "320"):                  # Phase 0 test: Tandy layouts only
         h.send_text("E mode must be 640 or 320\n", 400)
         return
     sample = h.app.sample_image()
@@ -168,7 +168,7 @@ def h_test_image(h: Handler):
 def _mode(h: Handler) -> str:
     mode = h._query().get("mode") or h.app.config["dither"]["mode"]
     if mode not in D.MODES:
-        raise ValueError("mode must be 640 or 320")
+        raise ValueError("mode must be 640, 320 or cga")
     return mode
 
 
@@ -192,16 +192,18 @@ def h_gen(h: Handler):
 # ---------------------------------------------------------------- chat (Phase 2)
 
 def h_chat(h: Handler):
-    """POST /chat[?id=<chat>&img=<image>&draw_enhance=0|1]  body = the user's message.  Streams the reply."""
+    """POST /chat[?id=<chat>&img=<image>&draw_enhance=0|1&mode=cga]  body = the user's message.  Streams the reply.
+    mode=cga: a CGA PC is asking (its own prompts, pictures drawn in CGA)."""
     q = h._query()
     text = _text_body(h)
     if not text:
         h.send_text("E Empty message\n", 400)
         return
     de = q.get("draw_enhance")
+    mode = _mode(h) if q.get("mode") else None
     h.start_stream()
     h.app.chat.reply(q.get("id"), text, (q.get("img") or "").upper() or None, h.stream_line,
-                     None if de is None else de == "1")
+                     None if de is None else de == "1", mode)
 
 
 def h_chats(h: Handler):
@@ -235,14 +237,15 @@ def h_chat_sync(h: Handler, id_: str):
 
 
 def h_enhance(h: Handler):
-    """POST /enhance  body = picture idea.  Streams 'S thinking' keep-alives, then 'T <prompt>' and 'D'."""
+    """POST /enhance[?mode=cga]  body = picture idea.  Streams 'S thinking' keep-alives, then 'T <prompt>' and 'D'."""
     idea = _text_body(h)
     if not idea:
         h.send_text("E Empty prompt\n", 400)
         return
+    mode = _mode(h) if h._query().get("mode") else None
     h.start_stream()
     try:
-        h.stream_line("T " + TX.to_cp437(h.app.chat.enhance(idea, h.stream_line)))
+        h.stream_line("T " + TX.to_cp437(h.app.chat.enhance(idea, h.stream_line, mode)))
     except QwenError as e:
         h.stream_line(f"E {e}")
     h.stream_line("D")
@@ -320,10 +323,14 @@ def h_img(h: Handler, id_: str):
 
 
 def h_thumb(h: Handler, id_: str):
-    """GET /img/<id>/thumb: just the thumbnail pixels (for gallery sync)."""
+    """GET /img/<id>/thumb[?mode=cga]: just the thumbnail pixels (for gallery sync)."""
     id_ = _get_id(h, id_)
     if id_:
-        h.send_bytes(tpi.parse(h.app.store.tpi_bytes(id_)).thumb)
+        s = None
+        if h._query().get("mode"):
+            s = h.app.config.dither_settings()
+            s.mode = _mode(h)
+        h.send_bytes(tpi.parse(h.app.store.tpi_bytes(id_, s)).thumb)
 
 
 def h_title(h: Handler, id_: str):

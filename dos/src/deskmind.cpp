@@ -1,6 +1,9 @@
-// DeskMind - generative AI for the Tandy 1000 TL/3.
+// DeskMind - generative AI for the Tandy 1000 TL/3 (and CGA PCs).
 //
-//   DESKMIND [/NONET] [/NOMOUSE]
+//   DESKMIND [/NONET] [/NOMOUSE] [/CGA]
+//
+// /CGA forces CGA mode (640x200 black and white, CGA pictures in PICSCGA); any PC
+// without Tandy video uses it anyway.
 //
 // Chat with Qwen, create pictures with Krea 2, browse them in a gallery.
 // All the heavy work is done by MindServer on the PC (see helper\).
@@ -19,6 +22,7 @@
 #include "sys.h"
 #include "cfg.h"
 #include "net.h"
+#include "tpi.h"
 
 enum { M_ABOUT = 300, M_SETTINGS, M_EXIT,
        M_CHAT, M_CHAT_NEW, M_CHAT_OPEN, M_CHAT_ATTACH,
@@ -65,6 +69,44 @@ static void idle( void ) {
   if ( app_net ) net_poll( );
 }
 
+// ---------------------------------------------------------------- F9: sound check
+// For the stuck-note hunt.  Each press within 10 s goes one step further, and every press
+// appends the sound state and the recent sound events to SOUND.LOG next to DESKMIND.EXE:
+//   1 nothing changed (a snapshot)   2 sound chip silenced   3 PC speaker gate off
+//   4 speaker timer + sound switch reset
+// The user notes which press stopped the note.  No step plays a sound.
+static int s_f9Step = 0;
+static unsigned long s_f9Last = 0;
+
+static void net_event( int open ) { snd_log( SL_NET, open ); }
+
+static void sound_check( void ) {
+  if ( ticks( ) - s_f9Last > 182 ) s_f9Step = 0;
+  s_f9Last = ticks( );
+  if ( ++s_f9Step > 4 ) s_f9Step = 1;
+  if ( s_f9Step == 1 ) snd_log( SL_USER, 1 ); else snd_force( s_f9Step );
+  char path[80];
+  sprintf( path, "%sSOUND.LOG", app_dir );
+  FILE *f = fopen( path, "a" );
+  if ( f ) {
+    struct dosdate_t d;
+    struct dostime_t t;
+    _dos_getdate( &d );
+    _dos_gettime( &t );
+    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.8.3 ===\n",
+             s_f9Step, d.year, d.month, d.day, t.hour, t.minute, t.second );
+    snd_diag( f );
+    fclose( f );
+  }
+  static const char *const msg[] = { "",                     // the status line shows 79 characters
+    "F9 check 1: saved to SOUND.LOG.  Still hearing the note?  Press F9 again.",
+    "F9 check 2: sound chip told to be quiet.  Still hearing it?  Press F9 again.",
+    "F9 check 3: PC speaker switched off.  Still hearing it?  Press F9 again.",
+    "F9 check 4: speaker timer and sound switch reset.  Which step stopped it?" };
+  if ( f ) app_status( "%s", msg[ s_f9Step ] );
+  else app_status( "F9 check %d done, but SOUND.LOG could not be written.", s_f9Step );
+}
+
 static int run_command( int id ) {
   switch ( id ) {
     case M_ABOUT:       app_about( ); break;
@@ -84,15 +126,19 @@ static int run_command( int id ) {
 }
 
 int main( int argc, char *argv[] ) {
-  int noNet = 0, noMouse = 0;
+  int noNet = 0, noMouse = 0, forceCga = 0;
   for ( int i = 1; i < argc; i++ ) {
     if ( str_ieq( argv[i], "/NONET" ) ) noNet = 1;
     else if ( str_ieq( argv[i], "/NOMOUSE" ) ) noMouse = 1;
+    else if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
     else if ( argv[i][0] == '/' || argv[i][0] == '?' ) {
-      printf( "DESKMIND [/NONET] [/NOMOUSE]\n" );
+      printf( "DESKMIND [/NONET] [/NOMOUSE] [/CGA]\n" );
       return 0;
     }
   }
+  // 640x200x16 needs Tandy Video II; everything else gets CGA
+  cfg_cga = forceCga || vid_detect( ) != VT_SLTL;
+  tpi_cga = cfg_cga;
 
   str_copy( app_dir, argv[0], sizeof( app_dir ) );
   char *slash = strrchr( app_dir, '\\' );
@@ -101,12 +147,12 @@ int main( int argc, char *argv[] ) {
   char cfgFile[80];
   cfg_path( cfgFile, app_dir );
   if ( cfg_load( cfgFile ) ) cfg_save( cfgFile );
-  mkdir( cfg.pics );
+  mkdir( cfg_pics( ) );
   mkdir( cfg.chats );
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( "DeskMind 0.7\n" );
+  printf( cfg_cga ? "DeskMind 0.8.3 (CGA)\n" : "DeskMind 0.8.3\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );
@@ -123,23 +169,27 @@ int main( int argc, char *argv[] ) {
   gallery_init( );
   if ( !chat_ready( ) ) { printf( "Not enough memory.\n" ); if ( app_net ) net_done( ); return 1; }
 
-  int rc = vid_reserve( VM_640 );
+  int gmode = cfg_cga ? VM_CGA2 : VM_640;
+  int rc = vid_reserve( gmode );             // nothing to reserve for CGA
   if ( rc ) {
     printf( "Cannot use 640x200 graphics: %s\n", vid_reserve_error( rc ) );
     if ( app_net ) net_done( );
     return 1;
   }
   snd_init( );
-  vid_open( VM_640 );
+  vid_open( gmode );
   if ( !noMouse ) gui_init( );
   gui_idle = idle;
+  gui_f9 = sound_check;
+  net_event_hook = net_event;
   net_wait_hook = gui_pump;               // the pointer keeps moving during network waits
   app_redraw_fn = redraw_all;
 
   s_screen = SCR_CHAT;
   redraw_all( );
   snd_play( SND_STARTUP );
-  if ( !app_net ) app_status( "Offline: the Gallery works; Chat and Create need the network (boot with W)." );
+  if ( !app_net ) app_status( cfg_cga ? "Offline: the Gallery works; Chat and Create need the network (packet driver)."
+                                      : "Offline: the Gallery works; Chat and Create need the network (boot with W)." );
   else if ( !app_server.ok ) app_status( "MindServer is not answering at %s:%u. Start it on the PC, or check Settings (F5).", cfg.server, cfg.port );
 
   s_lastPing = ticks( );

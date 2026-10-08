@@ -33,6 +33,7 @@ struct Event {
 };
 
 extern void ( *gui_idle )( void );     // called on every poll (network, animations)
+extern void ( *gui_f9 )( void );       // F9 anywhere (DeskMind's sound check); the key is then swallowed
 
 int  gui_init( void );                 // mouse, sound; returns 0 = ok (video must be open)
 void gui_done( void );

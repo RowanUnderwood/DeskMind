@@ -1,4 +1,4 @@
-// DeskMind - Tandy Video II graphics.  See video.h.
+// DeskMind - Tandy Video II and CGA graphics.  See video.h.
 //
 // 640x200x16 register values come from TANDOTS.ASM (tanvid.zip, 1995,
 // oldskool.org Tandy archive), which was written for the SL/TL/RL.
@@ -103,6 +103,7 @@ int vid_reserve( int mode ) {
   union REGS r;
 
   if ( s_resSeg ) return 0;
+  if ( mode == VM_CGA2 || mode == VM_CGA4 ) return 0;     // CGA RAM is at B800, not in the 640K
   s_tailSeg = s_tailParas = 0;
 
   int86( 0x12, &r, &r );
@@ -184,6 +185,57 @@ static void tail_restore( void ) {
 unsigned vid_reserve_seg( void ) { return s_resSeg; }
 
 
+// ---------------------------------------------------------------- colours
+//
+// Logical colours 0-15 -> pixel values of the current mode (s_map) and a byte
+// full of that value (s_fill).  CGA 4-colour pictures map each logical colour to
+// the nearest palette colour; 640x200x2 maps dark colours to black, light to white.
+
+static const unsigned char s_rgb[16][3] = {
+  { 0, 0, 0 }, { 0, 0, 2 }, { 0, 2, 0 }, { 0, 2, 2 }, { 2, 0, 0 }, { 2, 0, 2 }, { 2, 1, 0 }, { 2, 2, 2 },
+  { 1, 1, 1 }, { 1, 1, 3 }, { 1, 3, 1 }, { 1, 3, 3 }, { 3, 1, 1 }, { 3, 1, 3 }, { 3, 3, 1 }, { 3, 3, 3 }
+};
+static const unsigned char s_cgaSets[6][3] = {
+  { 2, 4, 6 }, { 10, 12, 14 }, { 3, 5, 7 }, { 11, 13, 15 }, { 3, 4, 7 }, { 11, 12, 15 }
+};
+static unsigned char s_map[16], s_fill[16];
+static int s_cgaPal = 3, s_cgaBg = 0;
+static int s_hwMode5 = 0;                      // currently in BIOS mode 5 (the cyan/red set)
+
+int vid_bpp = 4;
+int vid_shift = 1;
+static unsigned char s_pmask = 1;              // pixels per byte - 1
+static unsigned char s_vmask = 0x0F;           // one pixel's bits
+
+static void set_maps( void ) {
+  for ( int c = 0; c < 16; c++ ) {
+    unsigned char v;
+    if ( vid_bpp == 4 ) v = (unsigned char)c;
+    else if ( vid_bpp == 1 ) v = ( c == 7 || c >= 9 ) ? 1 : 0;      // light grey and the bright colours
+    else {
+      int best = 0x7FFF;
+      v = 0;
+      for ( int i = 0; i < 4; i++ ) {
+        int pc = i ? s_cgaSets[ s_cgaPal ][ i - 1 ] : s_cgaBg;
+        int d = 0;
+        for ( int k = 0; k < 3; k++ ) { int e = s_rgb[c][k] - s_rgb[pc][k]; d += e * e; }
+        if ( d < best ) { best = d; v = (unsigned char)i; }
+      }
+    }
+    s_map[c] = v;
+    s_fill[c] = vid_bpp == 4 ? (unsigned char)( v * 0x11 ) : vid_bpp == 2 ? (unsigned char)( v * 0x55 ) : (unsigned char)( v ? 0xFF : 0 );
+  }
+}
+
+static void set_depth( int bpp ) {
+  vid_bpp = bpp;
+  vid_shift = bpp == 4 ? 1 : bpp == 2 ? 2 : 3;
+  s_pmask = (unsigned char)( ( 8 / bpp ) - 1 );
+  s_vmask = (unsigned char)( ( 1 << bpp ) - 1 );
+  set_maps( );
+}
+
+
 // ---------------------------------------------------------------- mode set
 
 static void crtc( unsigned char reg, unsigned char val ) {
@@ -258,21 +310,70 @@ static void unset_640( void ) {
   outp( 0x3D8, 0x29 );
 }
 
+int vid_is_cga( void ) { return vid_mode == VM_CGA2 || vid_mode == VM_CGA4; }
+
+// The CGA 4-colour palette into the hardware: the colour select register has the
+// background in bits 0-3, intensity in bit 4 and the palette in bit 5; the
+// cyan/red set needs BIOS mode 5.  A Tandy works the same way in its CGA modes:
+// that colour then goes through its palette registers, which the BIOS leaves as
+// they are (identity), so loading those with our colours would change nothing.
+static void apply_cga_palette( void ) {
+  if ( vid_mode != VM_CGA4 ) return;
+  int mode5 = s_cgaPal >= 4;
+  if ( mode5 != s_hwMode5 ) { bios_mode( mode5 ? 5 : 4 ); s_hwMode5 = mode5; }
+  unsigned char v = (unsigned char)( ( s_cgaBg & 15 ) | ( ( s_cgaPal & 1 ) ? 0x10 : 0 ) | ( ( s_cgaPal == 2 || s_cgaPal == 3 ) ? 0x20 : 0 ) );
+  outp( 0x3D9, v );
+  *(unsigned char far *)MK_FP( 0x40, 0x66 ) = v;    // BIOS copy of the colour select register
+}
+
+void vid_cga_palette( int pal, int bg ) {
+  s_cgaPal = ( pal >= 0 && pal < 6 ) ? pal : 3;
+  s_cgaBg = bg & 15;
+  apply_cga_palette( );
+  if ( vid_mode == VM_CGA4 ) set_maps( );
+}
+
+static void set_cga( int mode ) {
+  if ( mode == VM_CGA2 ) {
+    bios_mode( 6 );
+    vid_w = 640; vid_pitch = 80;
+    set_depth( 1 );
+  }
+  else {
+    s_hwMode5 = s_cgaPal >= 4;
+    bios_mode( s_hwMode5 ? 5 : 4 );
+    vid_w = 320; vid_pitch = 80;
+    vid_mode = VM_CGA4;
+    apply_cga_palette( );
+    set_depth( 2 );
+  }
+  vid_h = 200;
+}
+
+static void build_line_table( void );
+
 int vid_open( int mode ) {
   union REGS r;
   r.h.ah = 0x0F;
   int86( 0x10, &r, &r );
   s_oldMode = r.h.al;
 
-  if ( mode != VM_640 && mode != VM_320 ) return 1;
-  tail_protect( );              // both modes' video RAM covers DOS's top block
+  if ( mode < VM_640 || mode > VM_CGA4 ) return 1;
   if ( mode == VM_640 ) {
+    tail_protect( );            // the video RAM covers DOS's top block
     set_640( );
     vid_w = 640; vid_h = 200; vid_pitch = 320;
+    set_depth( 4 );
   }
   else if ( mode == VM_320 ) {
+    tail_protect( );
     bios_mode( 9 );
     vid_w = 320; vid_h = 200; vid_pitch = 160;
+    set_depth( 4 );
+  }
+  else {
+    vid_mode = mode;
+    set_cga( mode );
   }
   vid_mode = mode;
   build_line_table( );
@@ -280,9 +381,26 @@ int vid_open( int mode ) {
   return 0;
 }
 
+int vid_switch( int mode ) {
+  if ( vid_mode == VM_NONE ) return vid_open( mode );
+  if ( mode == vid_mode ) return 0;
+  if ( vid_is_cga( ) && ( mode == VM_CGA2 || mode == VM_CGA4 ) ) {
+    vid_mode = mode;
+    set_cga( mode );
+    build_line_table( );
+    return 0;
+  }
+  unsigned char old = s_oldMode;
+  vid_close( );
+  int rc = vid_open( mode );
+  s_oldMode = old;
+  return rc;
+}
+
 void vid_close( void ) {
   if ( vid_mode == VM_640 ) unset_640( );
   vid_mode = VM_NONE;
+  s_hwMode5 = 0;
   bios_mode( ( s_oldMode == 7 ) ? 3 : s_oldMode );
   tail_restore( );              // after the mode change: text mode no longer uses that RAM
 }
@@ -295,8 +413,9 @@ static unsigned s_lineOff[ 200 ];
 
 static void build_line_table( void ) {
   for ( unsigned y = 0; y < 200; y++ ) {
-    if ( vid_mode == VM_640 ) s_lineOff[y] = y * 320u;
-    else                      s_lineOff[y] = ( ( y & 3 ) << 13 ) + ( y >> 2 ) * 160u;
+    if ( vid_mode == VM_640 )      s_lineOff[y] = y * 320u;
+    else if ( vid_mode == VM_320 ) s_lineOff[y] = ( ( y & 3 ) << 13 ) + ( y >> 2 ) * 160u;
+    else                           s_lineOff[y] = ( ( y & 1 ) << 13 ) + ( y >> 1 ) * 80u;
   }
   s_lineSeg = ( vid_mode == VM_640 ) ? 0xA000 : 0xB800;
 }
@@ -305,25 +424,46 @@ unsigned char far *vid_line_ptr( int y ) {
   return (unsigned char far *)MK_FP( s_lineSeg, s_lineOff[ y ] );
 }
 
-void vid_scroll_down( int x, int y, int w, int h, int n, unsigned char fill ) {
-  // Byte-aligned region (x and w even); moves lines y.. down by n (bottom first), fills the top n lines
-  if ( n <= 0 || h <= 0 ) return;
-  if ( n >= h ) { vid_fill( x, y, w, h, fill ); return; }
-  unsigned bx = (unsigned)x >> 1, bytes = (unsigned)w >> 1;
-  for ( int r = h - 1; r >= n; r-- ) {
-    _fmemcpy( vid_line_ptr( y + r ) + bx, vid_line_ptr( y + r - n ) + bx, bytes );
+// Bytes b0..b1 of a pixel span x0..x1, with the masks of the partial end bytes
+struct Span { unsigned b0, b1; unsigned char m0, m1; };
+
+static void span_of( int x0, int x1, Span *s ) {
+  s->b0 = (unsigned)x0 >> vid_shift;
+  s->b1 = (unsigned)x1 >> vid_shift;
+  s->m0 = (unsigned char)( 0xFF >> ( ( x0 & s_pmask ) * vid_bpp ) );
+  s->m1 = (unsigned char)( 0xFF << ( ( s_pmask - ( x1 & s_pmask ) ) * vid_bpp ) );
+}
+
+// Copy the span of one line to another, leaving the pixels outside it alone
+static void copy_span( unsigned char far *dst, const unsigned char far *src, const Span *s ) {
+  if ( s->b0 == s->b1 ) {
+    unsigned char m = s->m0 & s->m1;
+    dst[ s->b0 ] = (unsigned char)( ( dst[ s->b0 ] & ~m ) | ( src[ s->b0 ] & m ) );
+    return;
   }
+  unsigned from = s->b0, to = s->b1 + 1;
+  if ( s->m0 != 0xFF ) { dst[ s->b0 ] = (unsigned char)( ( dst[ s->b0 ] & ~s->m0 ) | ( src[ s->b0 ] & s->m0 ) ); from++; }
+  if ( s->m1 != 0xFF ) { dst[ s->b1 ] = (unsigned char)( ( dst[ s->b1 ] & ~s->m1 ) | ( src[ s->b1 ] & s->m1 ) ); to--; }
+  if ( to > from ) _fmemcpy( dst + from, src + from, to - from );
+}
+
+void vid_scroll_down( int x, int y, int w, int h, int n, unsigned char fill ) {
+  // Moves lines y.. down by n (bottom first), fills the top n lines
+  if ( n <= 0 || h <= 0 || w <= 0 ) return;
+  if ( n >= h ) { vid_fill( x, y, w, h, fill ); return; }
+  Span s;
+  span_of( x, x + w - 1, &s );
+  for ( int r = h - 1; r >= n; r-- ) copy_span( vid_line_ptr( y + r ), vid_line_ptr( y + r - n ), &s );
   vid_fill( x, y, w, n, fill );
 }
 
 void vid_scroll_up( int x, int y, int w, int h, int n, unsigned char fill ) {
-  // Byte-aligned region (x and w even); moves lines y+n.. up to y.., fills the bottom n lines
-  if ( n <= 0 || h <= 0 ) return;
+  // Moves lines y+n.. up to y.., fills the bottom n lines
+  if ( n <= 0 || h <= 0 || w <= 0 ) return;
   if ( n >= h ) { vid_fill( x, y, w, h, fill ); return; }
-  unsigned bx = (unsigned)x >> 1, bytes = (unsigned)w >> 1;
-  for ( int r = 0; r < h - n; r++ ) {
-    _fmemcpy( vid_line_ptr( y + r ) + bx, vid_line_ptr( y + r + n ) + bx, bytes );
-  }
+  Span s;
+  span_of( x, x + w - 1, &s );
+  for ( int r = 0; r < h - n; r++ ) copy_span( vid_line_ptr( y + r ), vid_line_ptr( y + r + n ), &s );
   vid_fill( x, y + h - n, w, n, fill );
 }
 
@@ -333,15 +473,17 @@ void vid_clear( unsigned char c ) {
 
 void vid_pset( int x, int y, unsigned char c ) {
   if ( (unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h ) return;
-  unsigned char far *p = vid_line_ptr( y ) + ( x >> 1 );
-  if ( x & 1 ) *p = ( *p & 0xF0 ) | ( c & 0x0F );
-  else         *p = ( *p & 0x0F ) | ( c << 4 );
+  unsigned char far *p = vid_line_ptr( y ) + ( (unsigned)x >> vid_shift );
+  unsigned char sh = (unsigned char)( 8 - vid_bpp * ( ( x & s_pmask ) + 1 ) );
+  unsigned char m = (unsigned char)( s_vmask << sh );
+  *p = (unsigned char)( ( *p & ~m ) | ( ( s_map[ c & 15 ] << sh ) & m ) );
 }
 
 unsigned char vid_pget( int x, int y ) {
   if ( (unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h ) return 0;
-  unsigned char b = vid_line_ptr( y )[ x >> 1 ];
-  return ( x & 1 ) ? ( b & 0x0F ) : ( b >> 4 );
+  unsigned char b = vid_line_ptr( y )[ (unsigned)x >> vid_shift ];
+  unsigned char sh = (unsigned char)( 8 - vid_bpp * ( ( x & s_pmask ) + 1 ) );
+  return (unsigned char)( ( b >> sh ) & s_vmask );
 }
 
 void vid_hline( int x0, int x1, int y, unsigned char c ) {
@@ -350,9 +492,17 @@ void vid_hline( int x0, int x1, int y, unsigned char c ) {
   if ( x0 < 0 ) x0 = 0;
   if ( x1 >= vid_w ) x1 = vid_w - 1;
   unsigned char far *line = vid_line_ptr( y );
-  if ( x0 & 1 ) { vid_pset( x0, y, c ); x0++; }
-  if ( !( x1 & 1 ) ) { vid_pset( x1, y, c ); x1--; }
-  if ( x1 > x0 ) _fmemset( line + ( x0 >> 1 ), c * 0x11, ( x1 - x0 + 1 ) >> 1 );
+  unsigned char fb = s_fill[ c & 15 ];
+  Span s;
+  span_of( x0, x1, &s );
+  if ( s.b0 == s.b1 ) {
+    unsigned char m = s.m0 & s.m1;
+    line[ s.b0 ] = (unsigned char)( ( line[ s.b0 ] & ~m ) | ( fb & m ) );
+    return;
+  }
+  line[ s.b0 ] = (unsigned char)( ( line[ s.b0 ] & ~s.m0 ) | ( fb & s.m0 ) );
+  line[ s.b1 ] = (unsigned char)( ( line[ s.b1 ] & ~s.m1 ) | ( fb & s.m1 ) );
+  if ( s.b1 > s.b0 + 1 ) _fmemset( line + s.b0 + 1, fb, s.b1 - s.b0 - 1 );
 }
 
 void vid_vline( int x, int y0, int y1, unsigned char c ) {
@@ -377,11 +527,21 @@ void vid_rect( int x, int y, int w, int h, unsigned char c ) {
 
 // ---------------------------------------------------------------- text
 
+extern const unsigned char font_hi[ 128 * 8 ];     // fonthi.cpp
+
 void vid_font_rom( void ) {
   s_fontLo = (const unsigned char far *)MK_FP( 0xF000, 0xFA6E );
+  // Characters 128-255: INT 1Fh points at them on a Tandy (or with GRAFTABL); a plain
+  // PC/AT leaves it empty, or pointing at something that is no font: use our own then
   unsigned long far *ivt = (unsigned long far *)MK_FP( 0, 0 );
   unsigned long v = ivt[ 0x1F ];
   s_fontHi = v ? (const unsigned char far *)MK_FP( (unsigned)( v >> 16 ), (unsigned)v ) : 0;
+  if ( s_fontHi ) {
+    unsigned i;
+    for ( i = 1; i < 128 * 8 && s_fontHi[i] == s_fontHi[0]; i++ ) ;
+    if ( i == 128 * 8 ) s_fontHi = 0;
+  }
+  if ( !s_fontHi ) s_fontHi = (const unsigned char far *)font_hi;
 }
 
 static unsigned long s_tab[ 256 ];
@@ -401,14 +561,32 @@ static void build_char_table( unsigned char fg, unsigned char bg ) {
   s_tabFg = fg; s_tabBg = bg;
 }
 
+// 640x200x2: a font row is already a screen byte (at any x: split over two bytes)
+static void char_1bpp( int x, int y, const unsigned char far *glyph, unsigned char fg, int bg ) {
+  unsigned char fv = s_map[ fg & 15 ], bv = bg >= 0 ? s_map[ bg & 15 ] : 0;
+  unsigned sh = x & 7, bx = (unsigned)x >> 3;
+  for ( int r = 0; r < 8; r++ ) {
+    unsigned char g = glyph[r], row, mask;
+    if ( bg >= 0 ) { row = fv ? ( bv ? 0xFF : g ) : ( bv ? (unsigned char)~g : 0 ); mask = 0xFF; }
+    else           { row = fv ? g : 0; mask = g; }
+    unsigned char far *p = (unsigned char far *)MK_FP( s_lineSeg, s_lineOff[ y + r ] + bx );
+    if ( !sh ) { p[0] = (unsigned char)( ( p[0] & ~mask ) | ( row & mask ) ); continue; }
+    unsigned char m0 = (unsigned char)( mask >> sh ), m1 = (unsigned char)( mask << ( 8 - sh ) );
+    p[0] = (unsigned char)( ( p[0] & ~m0 ) | ( ( row >> sh ) & m0 ) );
+    p[1] = (unsigned char)( ( p[1] & ~m1 ) | ( (unsigned char)( row << ( 8 - sh ) ) & m1 ) );
+  }
+}
+
 int vid_char( int x, int y, unsigned char ch, unsigned char fg, int bg ) {
   const unsigned char far *glyph;
   if ( ch < 128 ) glyph = s_fontLo + ch * 8;
   else if ( s_fontHi ) glyph = s_fontHi + ( ch - 128 ) * 8;
   else glyph = s_fontLo + '?' * 8;
 
-  if ( ( x & 1 ) || x < 0 || x + 8 > vid_w || y < 0 || y + 8 > vid_h ) {
-    // Slow path: odd x or partly off screen
+  int onScreen = x >= 0 && x + 8 <= vid_w && y >= 0 && y + 8 <= vid_h;
+  if ( onScreen && vid_bpp == 1 ) { char_1bpp( x, y, glyph, fg, bg ); return x + 8; }
+  if ( !onScreen || vid_bpp != 4 || ( x & 1 ) ) {
+    // Slow path: odd x, partly off screen, or 320x200x4
     for ( int r = 0; r < 8; r++ ) {
       unsigned char bits = glyph[r];
       for ( int c = 0; c < 8; c++ ) {
@@ -476,16 +654,26 @@ void vid_blit_full( const unsigned char far *src ) {
 }
 
 void vid_blit( int x, int y, int w, int h, const unsigned char far *src, unsigned srcPitch ) {
-  if ( x < 0 || y < 0 || x + w > vid_w || y + h > vid_h ) return;
-  unsigned bytes = (unsigned)w >> 1;
+  if ( x < 0 || y < 0 || x + w > vid_w || y + h > vid_h || w <= 0 ) return;
+  unsigned bytes = ( (unsigned)w + s_pmask ) >> vid_shift;
+  unsigned sh = vid_bpp == 1 ? ( x & 7 ) : 0;
   for ( int r = 0; r < h; r++ ) {
-    _fmemcpy( vid_line_ptr( y + r ) + ( x >> 1 ), src, bytes );
+    unsigned char far *d = vid_line_ptr( y + r ) + ( (unsigned)x >> vid_shift );
+    if ( !sh ) _fmemcpy( d, src, bytes );
+    else {
+      // 640x200x2 at any x: each source byte straddles two screen bytes
+      unsigned char keep = (unsigned char)( 0xFF << ( 8 - sh ) );       // pixels left of x
+      d[0] = (unsigned char)( ( d[0] & keep ) | ( src[0] >> sh ) );
+      for ( unsigned i = 1; i < bytes; i++ )
+        d[i] = (unsigned char)( ( src[ i - 1 ] << ( 8 - sh ) ) | ( src[i] >> sh ) );
+      d[ bytes ] = (unsigned char)( ( d[ bytes ] & ~keep ) | (unsigned char)( src[ bytes - 1 ] << ( 8 - sh ) ) );
+    }
     src += srcPitch;
   }
 }
 
 unsigned vid_save_size( int w, int h ) {
-  return (unsigned)h * ( ( (unsigned)w >> 1 ) + 1 );
+  return (unsigned)h * ( ( (unsigned)w >> vid_shift ) + 2 );
 }
 
 static int save_bounds( int &x, int &y, int &w, int &h, unsigned &bx, unsigned &bytes ) {
@@ -494,8 +682,8 @@ static int save_bounds( int &x, int &y, int &w, int &h, unsigned &bx, unsigned &
   if ( x + w > vid_w ) w = vid_w - x;
   if ( y + h > vid_h ) h = vid_h - y;
   if ( w <= 0 || h <= 0 ) return 0;
-  bx = (unsigned)x >> 1;
-  bytes = ( ( (unsigned)( x + w - 1 ) ) >> 1 ) - bx + 1;
+  bx = (unsigned)x >> vid_shift;
+  bytes = ( ( (unsigned)( x + w - 1 ) ) >> vid_shift ) - bx + 1;
   return 1;
 }
 

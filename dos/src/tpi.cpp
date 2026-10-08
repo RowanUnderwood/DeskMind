@@ -9,6 +9,12 @@
 #include "tpi.h"
 #include "video.h"
 
+int tpi_cga = 0;
+
+static int family_ok( const TpiHeader *h ) {
+  return tpi_cga ? ( h->mode == 3 || h->mode == 4 ) : ( h->mode == 1 || h->mode == 2 );
+}
+
 static int open_check( const char *path, TpiHeader *h ) {
   int fd = open( path, O_RDONLY | O_BINARY );
   if ( fd < 0 ) return -1;
@@ -24,7 +30,23 @@ int tpi_header( const char *path, TpiHeader *h ) {
   if ( fd < 0 ) return 1;
   close( fd );
   h->title[ sizeof( h->title ) - 1 ] = 0;
-  return 0;
+  return family_ok( h ) ? 0 : 4;
+}
+
+int tpi_vmode( const TpiHeader *h ) {
+  switch ( h->mode ) {
+    case 1: return VM_640;
+    case 2: return VM_320;
+    case 3: return VM_CGA4;
+    case 4: return VM_CGA2;
+  }
+  return VM_NONE;
+}
+
+void tpi_set_mode( const TpiHeader *h ) {
+  if ( !vid_is_cga( ) ) return;
+  if ( h->mode == 3 ) vid_cga_palette( h->cga_pal, h->cga_color );
+  vid_switch( tpi_vmode( h ) );
 }
 
 void tpi_id( const TpiHeader *h, char *out9 ) {
@@ -37,10 +59,11 @@ int tpi_show( const char *path ) {
   TpiHeader h;
   int fd = open_check( path, &h );
   if ( fd < 0 ) return 1;
-  int want = ( h.mode == 1 ) ? VM_640 : VM_320;
-  if ( want != vid_mode || h.width != (unsigned)vid_w || h.height != (unsigned)vid_h ) { close( fd ); return 2; }
+  if ( !family_ok( &h ) ) { close( fd ); return 2; }
+  tpi_set_mode( &h );
+  if ( tpi_vmode( &h ) != vid_mode || h.width != (unsigned)vid_w || h.height != (unsigned)vid_h ) { close( fd ); return 2; }
   lseek( fd, h.image_off, SEEK_SET );
-  unsigned pitch = h.width / 2;
+  unsigned pitch = vid_pitch;
   if ( vid_mode == VM_640 ) {
     // Linear: read big chunks directly into A000
     unsigned char far *v = vid_line_ptr( 0 );
@@ -65,7 +88,7 @@ int tpi_show( const char *path ) {
 int tpi_thumb( const char *path, unsigned char far *buf, TpiHeader *h ) {
   int fd = open_check( path, h );
   if ( fd < 0 ) return 1;
-  if ( h->thumb_len > TPI_THUMB_MAX ) { close( fd ); return 2; }
+  if ( h->thumb_len > TPI_THUMB_MAX || !family_ok( h ) ) { close( fd ); return 2; }
   lseek( fd, h->thumb_off, SEEK_SET );
   unsigned got;
   int bad = _dos_read( fd, buf, h->thumb_len, &got ) || got != h->thumb_len;
@@ -74,7 +97,13 @@ int tpi_thumb( const char *path, unsigned char far *buf, TpiHeader *h ) {
   return bad ? 3 : 0;
 }
 
+unsigned tpi_thumb_pitch( int tw ) { return tpi_cga ? (unsigned)tw / 8 : (unsigned)tw / 2; }
+
 void tpi_draw_thumb( int x, int y, const unsigned char far *buf, int tw, int th ) {
+  if ( tpi_cga ) {                 // 1 bit per pixel; the 640x200x2 blit takes any x
+    vid_blit( x, y, tw, th, buf, (unsigned)tw / 8 );
+    return;
+  }
   if ( x & 1 ) x++;
   vid_blit( x, y, tw, th, buf, (unsigned)tw / 2 );
 }
@@ -107,7 +136,8 @@ int tpi_image( const char *path, unsigned char far *buf, TpiHeader *h ) {
   int fd = open_check( path, h );
   if ( fd < 0 ) return 1;
   h->title[ sizeof( h->title ) - 1 ] = 0;
-  if ( h->mode != 1 || h->width != 640 || h->height != 200 || h->image_len != 64000u ) { close( fd ); return 2; }
+  unsigned want = h->mode == 1 ? 64000u : 16000u;
+  if ( !family_ok( h ) || h->mode == 2 || h->height != 200 || h->image_len != want ) { close( fd ); return 2; }
   lseek( fd, h->image_off, SEEK_SET );
   unsigned left = h->image_len;
   while ( left ) {
@@ -123,10 +153,15 @@ int tpi_lines_to_screen( const char *path, int y0, int n ) {
   TpiHeader h;
   int fd = open_check( path, &h );
   if ( fd < 0 ) return 1;
-  if ( h.mode != 1 || vid_mode != VM_640 ) { close( fd ); return 2; }
-  lseek( fd, h.image_off + (unsigned long)y0 * 320ul, SEEK_SET );
+  if ( tpi_vmode( &h ) != vid_mode || ( h.mode != 1 && !vid_is_cga( ) ) ) { close( fd ); return 2; }
+  lseek( fd, h.image_off + (unsigned long)y0 * vid_pitch, SEEK_SET );
   unsigned got;
-  int bad = _dos_read( fd, vid_line_ptr( y0 ), (unsigned)n * 320u, &got ) || got != (unsigned)n * 320u;
+  int bad = 0;
+  if ( h.mode == 1 )               // linear: one read
+    bad = _dos_read( fd, vid_line_ptr( y0 ), (unsigned)n * 320u, &got ) || got != (unsigned)n * 320u;
+  else
+    for ( int y = y0; y < y0 + n && !bad; y++ )
+      bad = _dos_read( fd, vid_line_ptr( y ), vid_pitch, &got ) || got != vid_pitch;
   close( fd );
   return bad ? 3 : 0;
 }

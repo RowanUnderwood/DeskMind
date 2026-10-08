@@ -31,10 +31,14 @@ void app_status( const char *fmt, ... );
 void app_spin( const char *text );          // animated status line, call repeatedly
 void app_pic_path( char *out, const char *id );
 int  app_have_pic( const char *id );
+int  app_twin_path( char *out, const char *id );   // the other mode's copy: 1 if it exists
 int  app_download_pic( const char *id );    // GET /img/<id> into PICS; 0 = ok
 int  app_upload_pic( const char *id );      // POST /img/<id>/upload; 0 = ok
 int  app_view_pic( const char *id );        // full screen until a key or click; 0 = ok
 int  app_ping( void );                      // refresh app_server; 0 = MindServer answered
+const char *app_pc( void );                 // "Tandy", or "PC" in CGA mode (for messages)
+int  app_gui_mode( void );                  // CGA: back to the GUI mode after a picture; 1 = switched (redraw)
+int  app_post_short( const char *path, const char *body );  // small POST, 3 s connect; HTTP status or NET_* (< 0)
 void app_menu_status( void );               // server lights in the menu bar
 int  app_need_net( const char *what );      // shows a message and returns 0 if offline
 void app_settings( void );                  // the settings dialog

@@ -85,9 +85,8 @@ class Store:
         """Recreate an entry from a TPI uploaded by the Tandy (when the original PNG is gone).
         The 'original' is then the dithered picture itself, stretched back to 4:3."""
         info = tpi.parse(data)
-        idx = D.unpack(info.image, info.width, info.height)
         with self.lock:
-            D.preview_4x3(idx, width=1024).save(self.path(info.id, "png"))
+            D.preview_4x3(info.image_idx(), width=1024, pal=info.rgb()).save(self.path(info.id, "png"))
             meta = {"id": info.id, "title": info.title, "prompt": info.prompt, "original_prompt": info.prompt,
                     "seed": info.seed, "created": info.created.isoformat(timespec="seconds"),
                     "mode": info.mode, "source": "tandy-upload"}
@@ -129,11 +128,11 @@ class Store:
         """(Re)dither the original with `settings` and write <ID>.<mode>.tpi (one cache per mode)."""
         meta = self.meta(id_)
         src = self.original(id_)
-        idx = D.convert(src, settings)
+        d = D.render(src, settings)
         th = D.thumbnail(src, settings)
         created = datetime.fromisoformat(meta["created"])
-        data = tpi.build(id_, settings.mode, idx, th, meta["title"], meta["prompt"],
-                         meta.get("seed", 0), created)
+        data = tpi.build(id_, d.layout, d.idx, th, meta["title"], meta["prompt"],
+                         meta.get("seed", 0), created, d.cga_pal, d.cga_color)
         with self.lock:
             with open(self.tpi_path(id_, settings.mode), "wb") as f:
                 f.write(data)
@@ -154,8 +153,7 @@ class Store:
         """Save the picture as the Tandy shows it (its TPI, stretched to 4:3) as a PNG.
         `settings` only supplies the palette."""
         info = tpi.parse(self.tpi_bytes(id_))
-        idx = D.unpack(info.image, info.width, info.height)
-        D.screen_shot(idx, settings).save(path, optimize=True)
+        D.screen_shot(info.image_idx(), settings, pal=info.rgb(settings)).save(path, optimize=True)
 
     def drop_tpi_cache(self, id_: str) -> None:
         """Forget the Tandy files (after the dither settings changed); rebuilt on next request."""
@@ -184,7 +182,7 @@ class Store:
 
     def delete(self, id_: str) -> None:
         with self.lock:
-            for ext in ("png", "json", "640.tpi", "320.tpi"):
+            for ext in ["png", "json"] + [f"{m}.tpi" for m in D.MODES]:
                 try:
                     os.remove(self.path(id_, ext))
                 except FileNotFoundError:

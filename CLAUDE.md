@@ -234,8 +234,91 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   `helper\out\system_chat.txt.bak-20261004c`). Replay of the failing turn: 3/3 real drawings; smoke test 10/10.
   Tests in `tests/test_core.py` (`test_old_draw_note`, `test_history`). Gallery grid bar got a white sunken frame
   (on the grey window its track was invisible); card backups `..._before/after-deskmind-gallerybar.img`; user confirmed both on the real TL/3 (2026-10-04).
+- **Workflow dropdown (2026-10-08).** The Generation tab picks any API-format workflow in `helper\workflows\` (`comfy.list_workflows()`);
+  it applies to the GUI test, Create and chat draws. `comfy.find_roles()` finds the patched nodes by type, not ID: the single KSampler,
+  the CLIPTextEncode upstream of its positive input, the size node (WLSH ratio latent, `ResolutionSelector` or `EmptyLatentImage`,
+  always 4:3 landscape from "short side"), SaveImage (prefix `DeskMind/dm`) and an optional rgthree LoRA loader. Steps/size/LoRA live in
+  `comfy.profiles[<workflow>]` (`Config.comfy_profile()`, falls back to the old flat values). `krea2_fine_v5.json` = the user's
+  "krea2SimpleFine (b)(API)" export, unchanged (UI version in `workflows\ui\`): 12 steps, no LoRA, 1048x784 at short side 768,
+  about 25 s vs 18 s for turbo, photographic rather than graphic. The UI file's subgraph has stale inner model names
+  (`Krea2_FineV4_INT8`, `qwen3vl_4b_int8_convrot`); harmless while the promoted outer values are used.
 - `tools\card_install.ps1`: mtools calls get `</dev/null` (a name-clash question once hung it for 40 minutes), steps are
   timestamped, and it logs to `tools\card_install.log` when run as `... *> card_install.log`.
+- **Delete Everywhere / rename (2026-10-04, on the card: backups `..._before/after-deskmind-deletefix.img`).** Delete Everywhere used to delete the
+  local file first, then wait out the 10 s connect timeout and ignore the result (picture came back on the next Sync). Now
+  `app_post_short()` (3 s connect) asks MindServer **first**; 200/404 = ok, otherwise "Delete here|Cancel" with the error.
+  Rename warns when MindServer kept the old title. Also fixed `q[100]` overflow in the delete question (40-char titles).
+- **CGA mode (plan: `~\.claude\plans\pasted-content-id-028a-delete-everywher-parallel-quasar.md`).** For a plain 286 with
+  CGA (card/monitor not known yet; RGB assumed). GUI will be CGA mode 6 (640x200x2, same layout, mono theme); pictures
+  320x200x4 or 640x200x2, chosen per picture. **Server side done (2026-10-04):** mode `cga` (`?mode=cga` on `/gen`, `/img`,
+  `/img/<id>/thumb`, `/chat`, `/enhance`); `dither.render()` returns `Dithered` (idx, layout, rgb); `cga_choose()` scores
+  6 palettes x 16 backgrounds + mono with Lab dither-mix error (lightness weighted 2x: otherwise dark grey beat black
+  backgrounds) and a grain penalty, about 0.3 s. TPI modes 3 = cga4, 4 = cga2 (byte 90 palette, 91 colour); CGA thumbs are
+  1-bit 160x50 (1000 bytes); image data is 16000 bytes either way. `TpiInfo.image_idx()/thumb_idx()/rgb()` replace raw
+  `D.unpack`. Prompts `*_cga.txt` used when mode=cga (generic 286 facts: fill in the real machine later). Dither Lab has
+  CGA palette/background/mode-5 controls; "Save as default" never stores mode cga (DeskMind on the Tandy asks without
+  `?mode=`). Live check on a second instance (port 8290): CGA facts, CGA draw (cga2 lighthouse), visio  **DOS side done (DeskMind 0.8, on the card 2026-10-04, backups `..._before/after-deskmind-cga.img`):**
+  - `video.cpp`: VM_CGA2 (BIOS mode 6, GUI) and VM_CGA4 (mode 4/5, pictures), B800 with 2 banks of 80-byte lines. All
+    primitives are generic over 4/2/1 bpp (`vid_bpp`, `vid_shift`, `Span` masks; scrolls copy exact pixels). Logical
+    colours map per mode (`s_map`): mono = LGRAY(7) and 9-15 white, rest black; 4-colour = nearest palette entry.
+    `vid_switch()` changes graphics mode keeping the saved text mode; `vid_cga_palette(pal, bg)` writes 3D9 and uses BIOS
+    mode 5 for the cyan/red sets. **A Tandy works the same way**: in its CGA modes the colour select logic runs first and
+    its result then goes through the palette registers (BIOS identity). Writing palette regs 10h-13h did nothing (86Box
+    `vid_tandy.c` confirms). No `vid_reserve()` and no tail protection in CGA.
+  - **Characters 128-255:** a plain AT leaves INT 1Fh empty, so check marks, accents and Qwen's bullets were '?'. Built-in
+    `fonthi.cpp` (from public-domain font8x8, `tools\make_fonthi.py`, a few glyphs hand-drawn) is used when INT 1Fh is
+    0 or points at uniform bytes. The Tandy keeps its BIOS font.
+  - `gui.cpp`: mono bevels are outlines, the desktop is a 0xAA/0x55 checkerboard, focused checkboxes get an underline.
+  - `tpi.cpp`: `tpi_cga` filter (a CGA run ignores Tandy files and vice versa), `tpi_set_mode()`, `tpi_thumb_pitch()`.
+    The chat thumbnail slices used `tw / 2`.
+  - `cfg_cga` (= `/CGA` or `vid_detect() != VT_SLTL`), `cfg_pics()` (PICSCGA via new `pics_cga` setting, so saving
+    settings never overwrites `pics`), `mode=cga` on `/gen`, `/chat`, `/enhance`, `/img`; `app_pc()` says "PC" in
+    messages; `app_gui_mode()` returns to mode 6 after a picture or slideshow.
+  - `sound.cpp`: Tandy chip only when `vid_detect() != VT_OTHER`, else PC speaker (PIT ch 2, voice 1, cut at decay 9).
+  - SLIDES: `/CGA` is read before the folder default; transitions scale with `U = vid_pitch / 80`; mode/palette switch
+    per picture (blank first when only the palette changes); 16000-byte buffer in CGA.
+  - VM: `vm\dm_at` = AMI 286 10 MHz + real CGA, disk `vm\dm_at.img` (made by `build_vm.sh`). Its BIOS stops at an
+    "EXIT FOR BOOT" menu: send Enter at about 30 s. 86Box ran CGA mode with network and mouse without crashing (Sync of 65
+    CGA pictures, live chat). Checked: AT/CGA (palettes 0, 1, mode 5, mono, slideshow, SLIDES, chat thumbs, dialogs),
+    SL/2 `/CGA` (palettes), SL/2 normal 16-colour regression. Real TL/3: TESTING.md round 8.
+  - **Real TL/3 (2026-10-04): two colourful photos came out black and white** (they read as grey on the CM-5). Not a
+    palette bug: mono bias 0.85 won near-ties (cost 29.1 vs 28.2). Now black and white needs chroma < 3 (greyscale
+    picture, `GREY_MONO_BIAS` 0.85) or must beat colour by `cga_mono_bias` = 1.1; only the noir silhouette of 74 stays
+    mono. Server `*.cga.tpi` caches were deleted; the Tandy keeps old files until they are deleted there and re-synced.then SLIDES `/CGA`.
+- **0.8.1 (2026-10-04): Sync chime, both picture folders.** Real TL/3: a Sync that fetched other-mode pictures left the
+  chime's last note ringing until a button click. The cause isn't proven (the INT 1Ch handler must have missed ticks; suspect the
+  folder scan right after `snd_play`). The fix: Gallery Sync plays the chime **after** `gallery_rescan`/`gallery_draw`, and
+  `snd_poll()` (called from `gui_poll`) stops any sequence still running 3 ticks past its length, by the BDA tick counter.
+  Delete Everywhere also removes the copy in the other mode's folder (`app_twin_path`, `cfg_pics_other`: PICS vs PICSCGA),
+  and Rename retitles it. MindServer's delete/rename already covered every cached mode. Plain Delete stays this-mode only.
+  Gallery Rename/Delete results go through `note()`, because `gallery_draw()` used to overwrite their status lines at once.
+  86Box: rename (SL/2) and Everywhere (AT/CGA with network) checked both folders and the server. Chime: TESTING.md round 8.1.
+- **0.8.2 (2026-10-04): stuck sounds, take two.** With 0.8.1 other sounds still stuck at **full volume** now and then (Chat
+  open, reply beep, Delete click), each until the next sound. The watchdog never fired, so those sequences had ended and the
+  silence had been sent: the chip lost writes, so missed ticks were not the cause. (The 0.8.1 "folder scan" theory was wrong
+  for these.) The likely cause is back-to-back port C0h writes: the SN76496 needs about 9 us per byte, and a lost latch byte
+  sends the next data byte to the wrong register. A PicoMEM snooping C0h is the alternative. Fix in `sound.cpp`: `sn_write`
+  waits about 12 us (12 reads of port 61h), and the tick handler rewrites all four volumes on every tick (`refresh()`; on
+  the PC speaker it forces the gate off when idle). `snd_mode` (0 old, 1 paced, 2 paced + refresh) exists only for
+  `SNDTEST.EXE` (`dos\spike\sndtest.cpp`), which stress-plays the effects with LISTEN pauses and an optional disk load.
+  86Box can't reproduce the stick (smoke test only). Real TL/3 results: TESTING.md round 8.2.
+- **0.8.3 (2026-10-04): stuck sounds, the real cause.** 0.8.2 didn't help, and SNDTEST (no network, buffered reads)
+  never stuck. A new SNDTEST with real disk writes made the 86Box Tandy crash ("Divide overflow") on the first sound. The
+  disassembly (capstone; `wdis` crashes) showed it: Watcom's large model assumes **SS = DGROUP**, so the static helpers called
+  from the INT 1Ch handler (`start_note`, `refresh`, `v_silence`/`v_vol` via `s_spk`, `sn_write` via `snd_mode`, `ring_put`)
+  reached our variables through **SS**. A tick that lands in DOS, the disk BIOS or the packet driver (another SS) read and
+  wrote foreign memory: a garbage `s_spk` sent the end-of-sound silence to the PC speaker instead of the chip, so the note
+  rang on until the next sound. The speaker path arrived with 0.8 (CGA), which is why the user only noticed then; network
+  and disk work make foreign ticks common. **Fix: `sound.obj` is compiled with `-zu`** (explicit makefile rule). It now has 0
+  `ss:` references, and SNDTEST with disk and network load runs clean in 86Box (miss 0). The 0.8.1/0.8.2 changes (chime after
+  scan, watchdog, paced writes, per-tick refresh) stay as harmless safety nets.
+  Diagnostics kept: `snd_isr_count`, a 64-event ring (PLAY/END/STOP/WATCHDOG/NET/STALL/F9/DISK+/DISK-/SETTLE) with a STALL
+  detector in `snd_poll`; **F9** anywhere (`gui_f9` hook) appends `snd_diag()` to `SOUND.LOG` in steps 1 (snapshot only),
+  2 (chip silence), 3 (speaker gate off), 4 (PIT 2 + multiplexer reset). `net_event_hook` logs connections, disk markers
+  wrap the rescan, delete, chat load/save/list and downloads, and `snd_settle()` waits for a playing sound before them.
+  `SNDTEST [/D] [/N] [/Q] [/Rn] [ip]`: D = temp-file writes + PICS header reads, N = 1 MB `/test/bytes` loops, Q = no
+  sounds, Rn = quit after n rounds (unattended VM runs). 86Box still crashes now and then at 0x53dee3 (known); it happened more
+  often right after `build_vm.sh`, so wait a moment or retry.
 - `dos\out\V640.EXE`: 640x200x16 mode set, memory claim (segment 9000h), colours, image, speed, mouse + Tandy sound, transitions.
 - `dos\out\NETTEST.EXE <ip>`: ping, 3x64K download, streamed lines, upload/echo, downloads `TEST640.RAW`/`TEST320.RAW`.
 - `helper\`: MindServer skeleton (`/ping`, `/test/*`), dither pipeline, ComfyUI client, `dithertest.py`, `comfytest.py`.
@@ -243,6 +326,10 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   dissolve 935 ms. Download through the emulated NE1000 about 97 KB/s (64,000 bytes in 0.65 s).
 
 ## Known quirks
+
+- **Interrupt handlers: compile with `-zu`.** Watcom's large model assumes SS = DGROUP and reaches static data through
+  SS. Any function an interrupt handler calls runs on the interrupted program's stack, so it must be in a module compiled
+  with `-zu` (see the `sound.obj` rule in `dos\makefile`). Check the EXE with capstone for `ss:[` in that code segment.
 
 - **Open Watcom v2 snapshot `_heapchk()` reports BADNODE from program start**, even in an empty program. So mTCP's
   "End: heap is corrupted!" at exit is a false alarm. Don't chase it in our code.

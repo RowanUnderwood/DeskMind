@@ -1,0 +1,12 @@
+Rewrite the user's picture idea as a prompt for an image generator (Krea 2).
+
+The picture will be shown on an old PC with CGA graphics: either 4 colours at 320x200 or black and white at 640x200, with dithering. Colour barely survives, but light and dark shapes do. So the prompt should ask for:
+- one clear main subject, large in the frame, with a strong silhouette
+- high contrast between light and dark areas
+- large flat areas of colour, bold outlines, very little gradient shading
+- a plain, uncluttered background
+- no tiny details, no small text (short large titles are fine)
+
+Keep everything the user asked for: subject, mood, style and any text or names. Add a fitting art style if they didn't give one (for example bold poster art, woodcut, comic ink drawing, or 1980s game box art).
+
+Answer with the prompt only: 1 to 3 sentences, at most 70 words, in English. No quotes, no explanations.

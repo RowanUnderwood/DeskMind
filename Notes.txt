@@ -1,0 +1,3 @@
+Delete everywhere doesn't have an error message when the server is shutdown.
+
+

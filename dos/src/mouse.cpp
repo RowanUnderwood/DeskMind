@@ -44,13 +44,13 @@ void mouse_read( int *x, int *y, int *buttons ) {
   r.w.ax = 0x0003;
   int86( 0x33, &r, &r );
   *x = r.w.cx; *y = r.w.dx; *buttons = r.w.bx & 3;
-  if ( vid_mode == VM_320 ) *x >>= 1;
+  if ( vid_w == 320 ) *x >>= 1;               // 320x200 modes: the virtual screen stays 640 wide
 }
 
 void mouse_warp( int x, int y ) {
   if ( !s_present ) return;
   union REGS r;
-  r.w.ax = 0x0004; r.w.cx = ( vid_mode == VM_320 ) ? x * 2 : x; r.w.dx = y;
+  r.w.ax = 0x0004; r.w.cx = ( vid_w == 320 ) ? x * 2 : x; r.w.dx = y;
   int86( 0x33, &r, &r );
 }
 

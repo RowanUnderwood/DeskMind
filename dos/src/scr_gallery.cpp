@@ -1,6 +1,7 @@
 // DeskMind - Gallery screen: thumbnail grid or list, view / rename / delete / ask Qwen / sync.
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
@@ -29,6 +30,7 @@ static int s_sel = 0;
 static int s_grid = 1;
 static unsigned char far *s_thumb = 0;
 char gallery_ask_id[9] = "";
+static char s_note[120] = "";        // an action's result, shown by the next gallery_draw
 
 // Grid geometry: 3 x 2 cells of 200 x 70
 #define GX0   20
@@ -62,16 +64,18 @@ static const char far *g_item( void *, int i );
 
 void gallery_rescan( void ) {
   if ( !s_p ) return;
+  snd_settle( );                                 // see save_chat in scr_chat.cpp
+  snd_log( SL_DISK_BEGIN, SD_RESCAN );
   s_n = 0;
   s_total = 0;
   struct find_t ff;
   char pattern[80];
-  sprintf( pattern, "%s\\*.TPI", cfg.pics );
+  sprintf( pattern, "%s\\*.TPI", cfg_pics( ) );
   unsigned rc = _dos_findfirst( pattern, _A_NORMAL, &ff );
   int oldest = -1;                               // when full: the entry a newer picture replaces
   while ( rc == 0 ) {
     char path[80];
-    sprintf( path, "%s\\%s", cfg.pics, ff.name );
+    sprintf( path, "%s\\%s", cfg_pics( ), ff.name );
     TpiHeader h;
     if ( tpi_header( path, &h ) == 0 ) {
       GPic q;
@@ -93,6 +97,7 @@ void gallery_rescan( void ) {
   if ( s_sel >= s_n ) s_sel = s_n - 1;
   if ( s_sel < 0 ) s_sel = 0;
   list_set( &s_ws[0], s_n, g_item, 0 );     // (passing 0 here once blanked the list view's titles)
+  snd_log( SL_DISK_END, SD_RESCAN );
 }
 
 static const char far *g_item( void *, int i ) {
@@ -180,7 +185,8 @@ void gallery_draw( void ) {
   if ( s_grid && s_form.focus == 0 ) s_form.focus = 1;
   form_draw( &s_form );
   if ( s_grid ) draw_grid( ); else draw_list_preview( );
-  if ( s_total > s_n )
+  if ( s_note[0] ) { app_status( "%s", s_note ); s_note[0] = 0; }
+  else if ( s_total > s_n )
     app_status( "Showing the newest %d of %d pictures.  Delete some to see the rest.", s_n, s_total );
   else
     app_status( "%d pictures.  Arrows/PgUp/PgDn move.  Enter or double-click views.  F2 Chat  F3 Create", s_n );
@@ -200,6 +206,23 @@ static void select( int i ) {
 
 // ---------------------------------------------------------------- actions
 
+// The result of Rename or Delete: gallery_draw() follows them and would overwrite a plain app_status
+static void note( const char *fmt, ... ) {
+  va_list a;
+  va_start( a, fmt );
+  vsprintf( s_note, fmt, a );
+  va_end( a );
+}
+
+// The last network error as a sentence (some already end in '?' or '.')
+static const char *err_sentence( void ) {
+  static char e[100];
+  str_copy( e, net_error( ), sizeof( e ) - 1 );
+  int n = (int)strlen( e );
+  if ( n && e[n-1] != '.' && e[n-1] != '?' ) { e[n] = '.'; e[n+1] = 0; }
+  return e;
+}
+
 static void do_rename( void ) {
   if ( s_sel >= s_n ) return;
   GPic &p = s_p[ s_sel ];
@@ -210,38 +233,68 @@ static void do_rename( void ) {
   app_pic_path( path, p.id );
   if ( tpi_set_title( path, buf ) ) { msg_box( "Rename", "Could not change the file.", "OK" ); return; }
   str_copy( p.title, buf, sizeof( p.title ) );
-  // Keep MindServer's title in step (the ID never changes)
+  // The other mode's copy gets the new title too (MindServer renames all of its copies)
+  char twin[80];
+  int twinBad = app_twin_path( twin, p.id ) && tpi_set_title( twin, buf );
+  // Keep MindServer's title in step (the ID never changes).  404 = MindServer doesn't have it.
   if ( app_net ) {
     char pth[40];
     sprintf( pth, "/img/%s/title", p.id );
-    if ( http_open( cfg.server, cfg.port, "POST", pth, buf, (unsigned)strlen( buf ), "text/plain" ) == 0 ) {
-      while ( http_headers( ) == NET_AGAIN ) ;
-      http_close( );
+    busy_begin( "Rename", "Telling MindServer..." );
+    int st = app_post_short( pth, buf );
+    busy_end( );
+    if ( st != 200 && st != 404 ) {
+      char t[240];
+      if ( st < 0 ) sprintf( t, "%s Renamed on this %s only; MindServer keeps the old title.", err_sentence( ), app_pc( ) );
+      else          sprintf( t, "Renamed on this %s only. MindServer said %d, so it keeps the old title.", app_pc( ), st );
+      msg_box( "Rename", t, "OK" );
     }
   }
-  app_status( "Renamed.  The file stays %s.TPI.", p.id );
+  if ( twinBad ) note( "Renamed, but not the %s copy.  The file stays %s.TPI.", cfg_cga ? "Tandy" : "CGA", p.id );
+  else note( "Renamed.  The file stays %s.TPI.", p.id );
 }
 
 static void do_delete( void ) {
   if ( s_sel >= s_n ) return;
   GPic &p = s_p[ s_sel ];
-  char q[100];
-  if ( app_net ) sprintf( q, "Delete \"%s\"?  Delete = only on this Tandy.  Everywhere = on MindServer too.", p.title );
-  else           sprintf( q, "Delete \"%s\" from this Tandy?  (MindServer keeps its copy.)", p.title );
+  char q[160];                            // title is up to 39 characters
+  if ( app_net ) sprintf( q, "Delete \"%s\"?  Delete = only on this %s.  Everywhere = on MindServer too.", p.title, app_pc( ) );
+  else           sprintf( q, "Delete \"%s\" from this %s?  (MindServer keeps its copy.)", p.title, app_pc( ) );
   int r = msg_box( "Delete picture", q, app_net ? "Delete|Everywhere|Cancel" : "Delete|Cancel" );
   if ( r == 0 || ( app_net ? r == 3 : r == 2 ) ) return;
-  char path[80];
-  app_pic_path( path, p.id );
-  remove( path );
+  // Everywhere: ask MindServer first.  Deleting here first would lose nothing on the server, and
+  // the next Sync would bring the picture back.  404 = MindServer doesn't have it: fine.
+  int here = 0;
   if ( app_net && r == 2 ) {
     char pth[40];
     sprintf( pth, "/img/%s/del", p.id );
-    if ( http_open( cfg.server, cfg.port, "POST", pth, 0, 0, 0 ) == 0 ) {
-      while ( http_headers( ) == NET_AGAIN ) ;
-      http_close( );
+    busy_begin( "Delete picture", "Deleting it on MindServer..." );
+    int st = app_post_short( pth, 0 );
+    busy_end( );
+    if ( st != 200 && st != 404 ) {
+      char t[320];
+      if ( st < 0 ) sprintf( t, "%s Delete \"%s\" only on this %s? Sync brings it back while MindServer has it.", err_sentence( ), p.title, app_pc( ) );
+      else          sprintf( t, "MindServer said %d. Delete \"%s\" only on this %s? Sync brings it back while MindServer has it.", st, p.title, app_pc( ) );
+      if ( msg_box( "Delete picture", t, "Delete here|Cancel" ) != 1 ) return;
+      here = 1;
     }
   }
-  app_status( "Deleted %s.", p.id );
+  char path[80];
+  app_pic_path( path, p.id );
+  snd_settle( );
+  snd_log( SL_DISK_BEGIN, SD_DELETE );
+  int bad = remove( path );
+  snd_log( SL_DISK_END, SD_DELETE );
+  if ( bad ) { msg_box( "Delete picture", "Could not delete the file.", "OK" ); return; }
+  if ( here || r == 1 ) note( "Deleted %s on this %s.", p.id, app_pc( ) );
+  else {
+    // Everywhere: also the copy synced in the other mode, or it would linger there
+    char twin[80];
+    const char *other = cfg_cga ? "Tandy" : "CGA";
+    if ( !app_twin_path( twin, p.id ) ) note( "Deleted %s here and on MindServer.", p.id );
+    else if ( remove( twin ) ) note( "Deleted %s here and on MindServer, but not the %s copy.", p.id, other );
+    else note( "Deleted %s here, in the %s pictures and on MindServer.", p.id, other );
+  }
   gallery_rescan( );
 }
 
@@ -296,9 +349,12 @@ void gallery_sync( void ) {
     busy_text( msg );
     char file[80], path[40];
     app_pic_path( file, want[i] );
-    sprintf( path, "/img/%s", want[i] );
+    sprintf( path, "/img/%s%s", want[i], cfg_cga ? "?mode=cga" : "" );
     int s2;
-    if ( http_get_file( cfg.server, cfg.port, path, file, sync_progress, &s2 ) < 0 ) {
+    snd_log( SL_DISK_BEGIN, SD_DOWNLOAD );
+    long rc = http_get_file( cfg.server, cfg.port, path, file, sync_progress, &s2 );
+    snd_log( SL_DISK_END, SD_DOWNLOAD );
+    if ( rc < 0 ) {
       failed++;
       if ( !strcmp( net_error( ), "Cancelled" ) ) break;     // Esc stops the whole sync
     }
@@ -306,9 +362,10 @@ void gallery_sync( void ) {
   }
   free( want );
   busy_end( );
-  if ( got ) snd_play( SND_IMAGE );
   gallery_rescan( );
   gallery_draw( );
+  // After the folder scan, not before: the real TL/3 once held the chime's last note through it
+  if ( got ) snd_play( SND_IMAGE );
   if ( skipped )
     app_status( "Sync: %d new.  Gallery full (500): %d not fetched, delete some and sync again.", got, skipped );
   else
@@ -331,6 +388,7 @@ void gallery_slideshow( void ) {
   o.titles = 1; o.shuffle = cfg.slide_shuffle; o.loop = 1;
   gui_mouse_hide( );
   int shown = slide_run( s_n, s_sel, slide_path, 0, &o );
+  app_gui_mode( );
   gui_mouse_show( );
   if ( !shown ) {
     app_redraw( );

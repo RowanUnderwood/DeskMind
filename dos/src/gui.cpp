@@ -12,6 +12,7 @@
 #include "sys.h"
 
 void ( *gui_idle )( void ) = 0;
+void ( *gui_f9 )( void ) = 0;
 
 static int s_mouse = 0;
 static int s_hide = 0;
@@ -65,10 +66,12 @@ void form_set_focus( Form *f, int i );
 
 int gui_poll( Event *e ) {
   if ( gui_idle ) gui_idle( );
+  snd_poll( );
   e->type = EV_NONE;
   e->key = 0;
   e->x = s_mx; e->y = s_my; e->buttons = s_mb;
   int k = kbd_get( );
+  if ( k == K_F9 && gui_f9 ) { gui_f9( ); return EV_NONE; }
   if ( k ) { e->type = EV_KEY; e->key = k; return EV_KEY; }
   if ( !s_mouse ) return EV_NONE;
 
@@ -103,16 +106,24 @@ int ui_hit( int x, int y, int rx, int ry, int rw, int rh ) {
 
 void ui_desktop( void ) {
   gui_mouse_hide( );
-  // A light dither of blue and cyan feels less flat than a solid colour
+  // Blue on the Tandy; on CGA black and white the classic 50% grey checkerboard
   for ( int y = WORK_Y; y < STATUS_Y; y++ ) {
     unsigned char far *p = vid_line_ptr( y );
-    unsigned char v = ( y & 1 ) ? 0x11 : 0x11;
+    unsigned char v = vid_bpp == 1 ? ( ( y & 1 ) ? 0x55 : 0xAA ) : 0x11;
     _fmemset( p, v, vid_pitch );
   }
   gui_mouse_show( );
 }
 
 void ui_bevel( int x, int y, int w, int h, int raised ) {
+  if ( vid_bpp == 1 ) {
+    // Black and white: white edges would vanish on the white window, so outline the
+    // box and keep the thick dark edges (bottom/right raised, top/left sunken)
+    vid_rect( x, y, w, h, BLACK );
+    if ( raised ) { vid_hline( x, x + w - 1, y + h - 2, BLACK ); vid_vline( x + w - 2, y, y + h - 1, BLACK ); }
+    else vid_vline( x + 1, y, y + h - 1, BLACK );
+    return;
+  }
   unsigned char hi = raised ? WHITE : DGRAY, lo = raised ? DGRAY : WHITE;
   vid_hline( x, x + w - 1, y, hi );
   vid_fill( x, y, 2, h, hi );
@@ -459,12 +470,14 @@ void form_draw_widget( Form *f, int i ) {
       ui_button( cx, cy, w.w, w.h, w.text, fl );
       break;
     }
-    case W_CHECK:
+    case W_CHECK: {
       vid_fill( cx, cy, w.w, w.h, LGRAY );
       ui_sunken( cx, cy + 1, 14, 9, WHITE );
       if ( w.checked ) vid_char( cx + 4, cy + 1, 0xFB, BLACK, -1 );   // CP437 check mark
-      ui_text_fit( cx + 20, cy + 1, w.w - 20, w.text, focused ? BLUE : BLACK, -1 );
+      int ex = ui_text_fit( cx + 20, cy + 1, w.w - 20, w.text, focused ? BLUE : BLACK, -1 );
+      if ( focused && vid_bpp == 1 ) vid_hline( cx + 20, ex - 1, cy + 9, BLACK );   // blue doesn't show in black and white
       break;
+    }
     case W_EDIT: draw_edit( w, cx, cy, focused ); break;
     case W_MEMO: draw_memo( w, cx, cy, focused ); break;
     case W_LIST: draw_list( w, cx, cy, focused ); break;

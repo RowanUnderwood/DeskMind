@@ -24,6 +24,7 @@
 
 unsigned long net_connect_ms = 10000ul;
 void ( *net_wait_hook )( void ) = 0;
+void ( *net_event_hook )( int ) = 0;
 #define RECV_BUFFER        8192
 
 unsigned long net_timeout_ms = 30000ul;
@@ -159,6 +160,7 @@ int http_open( const char *host, unsigned port, const char *method, const char *
                const char far *body, unsigned bodyLen, const char *contentType ) {
   if ( !s_up ) { set_err( "Network not started" ); return NET_ERROR; }
   if ( s_sock ) http_close( );
+  if ( net_event_hook ) net_event_hook( 1 );
 
   IpAddr_t addr;
   if ( resolve( host, addr ) ) return NET_ERROR;
@@ -332,6 +334,7 @@ int http_line( char *line, unsigned max ) {
 
 void http_close( void ) {
   if ( !s_sock ) return;
+  if ( net_event_hook ) net_event_hook( 0 );
   s_sock->close( );
   TcpSocketMgr::freeSocket( s_sock );
   s_sock = 0;

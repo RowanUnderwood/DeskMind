@@ -36,6 +36,11 @@ DEFAULTS = {
         "shortside": 768,
         "lora_on": True,
         "lora_strength": 1.0,
+        # Per-workflow steps/shortside/lora_on/lora_strength (key = "workflow"); a missing value
+        # falls back to the flat ones above (settings from before profiles).
+        "profiles": {
+            "workflows/krea2_fine_v5.json": {"steps": 12},
+        },
     },
     "services": {
         "ninfer_bat": r"H:\Ninfer Qwen\launch-ninfer.bat",
@@ -45,6 +50,9 @@ DEFAULTS = {
     },
     "dither": DitherSettings(engine="pillow", method="floyd-steinberg").to_dict(),
 }
+
+
+PROFILE_KEYS = ("steps", "shortside", "lora_on", "lora_strength")
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -78,6 +86,17 @@ class Config:
 
     def __getitem__(self, key):
         return self.data[key]
+
+    def comfy_profile(self, workflow: str | None = None) -> dict:
+        """steps, shortside, lora_on, lora_strength for a workflow (default: the active one)."""
+        c = self.data["comfy"]
+        p = {k: c[k] for k in PROFILE_KEYS}
+        p.update(c["profiles"].get(workflow or c["workflow"], {}))
+        return p
+
+    def set_comfy_profile(self, workflow: str, **values) -> None:
+        self.data["comfy"]["profiles"].setdefault(workflow, {}).update(
+            {k: v for k, v in values.items() if k in PROFILE_KEYS})
 
     def dither_settings(self) -> DitherSettings:
         return DitherSettings.from_dict(self.data["dither"])
