@@ -1,5 +1,22 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 9.1: DeskMind 0.9.1, slideshow memory fix
+
+**Your round 9 test 3** ("Music: random songs" in Settings, then a slideshow: "Not enough memory for the slideshow").
+Cause: a 16-bit overflow made the slideshow ask EMS for **0 pages** (64000 + 16383 > 65535), so since 0.8.4 every
+slideshow quietly used a 63K DOS block, and About's "slideshow in EMS" only counted free pages. With the song's ~25K
+taken first, 63K no longer fitted. Now the picture buffer really is in EMS, the music starts only after the buffer
+has its memory, and a failure says why (e.g. "EMS error 80h, 41K free of 63K").
+
+1. Help > About: it should say **"slideshow in EMS"** (now a real allocate-and-map test). If it says "EMS error XXh",
+   write down XX.
+2. `C:\DESKMIND\SLIDES /LIST`: the last line should be **"Picture buffer: in EMS."**
+3. Repeat round 9 test 3: Settings > Music: random songs > Save, then F6. Music and pictures, no error.
+   Also with a long chat open, and after Settings a few times.
+4. About after the slideshow: the free memory should no longer drop by the slideshow (it was the 63K DOS block's
+   heap side effects before; now nothing comes from DOS).
+5. Then continue round 9 from test 4.
+
 ## Round 9: DeskMind 0.9.0, music (songs, jukebox, slideshow music, modem start-up)
 
 **New:** songs for the Tandy's sound chip (3 voices + noise drums), played in the background from the timer

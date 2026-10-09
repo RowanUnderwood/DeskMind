@@ -18,6 +18,7 @@
 #include "net.h"
 #include "slide.h"
 #include "jukebox.h"
+#include "music.h"
 
 #define WIN_Y  SCR_Y
 #define WIN_H  ( SCR_H - 1 )
@@ -390,19 +391,26 @@ void gallery_slideshow( void ) {
   o.effect = cfg.slide_effect;
   o.titles = 1; o.shuffle = cfg.slide_shuffle; o.loop = 1;
   o.poll = slide_poll;
-  int music = jb_slides_begin( );            // Settings: slideshow music (unless a song already plays)
+  o.begin = jb_slides_begin;                 // Settings: slideshow music (unless a song already plays),
+                                             // started once the picture buffer has its memory
+  int wantMusic = cfg.slide_music && music_available( ) && jb_mode( ) == JB_IDLE && jb_count( ) > 0;
   gui_mouse_hide( );
   // Oldest first; a picture picked further down the list (or any, in random order) plays first
   int shown = slide_run( s_n, ( o.shuffle || s_sel > 0 ) ? s_sel : -1, slide_path, 0, &o );
-  jb_slides_end( music );
+  jb_slides_end( o.begun );
+  wantMusic = wantMusic && !o.begun && shown;
   app_gui_mode( );
   gui_mouse_show( );
   if ( !shown ) {
     app_redraw( );
-    msg_box( "Slideshow", "Not enough memory for the slideshow (it needs 63K, or EMS). Close the chat or restart DeskMind.", "OK" );
+    char m[200];
+    sprintf( m, "The slideshow could not start (%s). A picture needs 63K of memory or EMS: "
+                "restart DeskMind, or close the chat.", slide_fail_note( ) );
+    msg_box( "Slideshow", m, "OK" );
   }
   else app_redraw( );
-  app_status( "Slideshow: %d picture%s shown.", shown, shown == 1 ? "" : "s" );
+  app_status( "Slideshow: %d picture%s shown%s", shown, shown == 1 ? "" : "s",
+              wantMusic ? ", without music (not enough memory for the song)." : "." );
 }
 
 // ---------------------------------------------------------------- screen API

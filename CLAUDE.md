@@ -201,6 +201,15 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     `vid_text` once failed to draw a fourth panel line in the Music screen for no reason found; `ui_text_fit` works.
   - The venv's `pyvenv.cfg` pointed at the old `H:\Labtext2midi\.python` after the folder move: fixed (backup `.bak-20261009`).
   - **Card installs must not overwrite `C:\DESKMIND\MUSIC\SONGS.LST`** once the Tandy has its own songs (it holds their titles).
+  - **0.9.1 (2026-10-09): the EMS slideshow buffer never worked before.** Real TL/3 round 9: Settings "Music: random songs"
+    then F6 gave "Not enough memory for the slideshow" (music started first from the Music screen was fine). Cause:
+    `( 64000u + 16383u ) / 16384u` overflows 16 bits = **0 pages**; LTEMM answers 89h, so since 0.8.4 every 640 slideshow
+    quietly fell back to a 63K DOS block, and `slide_mem_note` ("in EMS") only compared the free-page count. With the song's
+    ~25K DOS block taken first the 63K no longer fitted. Fix: long math (`buf_pages`); `SlideOpts.begin` starts the music
+    after `buf_alloc` (`o.begun` -> `jb_slides_end`); `slide_mem_note` really allocates + maps + frees ("EMS error XXh, fits");
+    `slide_fail_note()` says why a show didn't start; `ems_err` keeps the last EMS AH; `SLIDES /LIST` prints the buffer line.
+    The 0.8.4 86Box "SLIDES from EMS" result was therefore the DOS fallback. Now 86Box `dm_ems`: `/LIST` "in EMS", an EMS show
+    ran 6/6 and exited, an EMS show with music played (screenshot); other runs died on 86Box's 0x53dee3 crash (also with /NOEMS).
 - **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
   AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
   mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports

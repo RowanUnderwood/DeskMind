@@ -311,7 +311,7 @@ void app_about( void ) {
   r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
-  sprintf( t, "DeskMind 0.9.0 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen, draw with Krea 2 and "
+  sprintf( t, "DeskMind 0.9.1 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen, draw with Krea 2 and "
               "compose with MIDI-GPT through MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK, "
               "slideshow %s. Built with Open Watcom and mTCP (GPLv3). "
               "Limits: the newest 500 pictures, 100 chats and 150 songs; a chat holds about 40,000 "

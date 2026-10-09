@@ -63,6 +63,17 @@ static void usage( void ) {
           "  Keys: Space/Right next, Left back, P pause, T titles, E effects, Esc quit\n" );
 }
 
+static const char *s_song = 0;         // /M with a song name or path
+static int s_mrc = MUS_OK;
+
+static int begin_music( void ) {
+  if ( !s_song ) return jb_slides_begin( );
+  char path[80];
+  if ( strchr( s_song, '\\' ) || strchr( s_song, '.' ) ) str_copy( path, s_song, sizeof( path ) );
+  else jb_path( path, s_song );
+  return ( s_mrc = music_play( path, 1 ) ) == MUS_OK;
+}
+
 int main( int argc, char *argv[] ) {
   // Settings: DESKMIND.CFG next to this program, if there is one
   char exeDir[80], cfgFile[80];
@@ -145,6 +156,8 @@ int main( int argc, char *argv[] ) {
     printf( "%d pictures in %s, %s order:\n", s_n, s_dir, o.shuffle ? "random" : "oldest first" );
     for ( int i = 0; i < s_n; i++ ) printf( "%3d  %s\n", i + 1, s_e[ order[i] ].name );
     free( order );
+    if ( !slide_no_ems ) ems_init( );
+    printf( "Picture buffer: %s.\n", slide_mem_note( ) );   // a real EMS allocate-and-map test
     return 0;
   }
 
@@ -179,22 +192,16 @@ int main( int argc, char *argv[] ) {
     if ( f ) fclose( f );
     return 0;
   }
-  // Music: a song given with /M loops; otherwise DeskMind's setting (random songs, or the
-  // song last played in its Music screen)
-  int music = 0, mrc = MUS_OK;
-  if ( song ) {
-    char path[80];
-    if ( strchr( song, '\\' ) || strchr( song, '.' ) ) str_copy( path, song, sizeof( path ) );
-    else jb_path( path, song );
-    music = ( mrc = music_play( path, 1 ) ) == MUS_OK;
-  }
-  else music = jb_slides_begin( );
+  // Music (started by slide_run once the picture buffer has its memory): a song given with /M
+  // loops; otherwise DeskMind's setting (random songs, or the song last played in its Music screen)
+  s_song = song;
+  o.begin = begin_music;
   int shown = slide_run( s_n, -1, path_of, 0, &o );   // -1: from the oldest (or random)
-  if ( music ) jb_stop( );
+  if ( o.begun ) jb_stop( );
   vid_close( );
   vid_unreserve( );
-  if ( mrc ) printf( "No music: %s (%s).\n", music_error( mrc ), song );
-  if ( !shown ) printf( "Not enough memory for the picture buffer (slideshow %s).\n", slide_mem_note( ) );
+  if ( s_mrc ) printf( "No music: %s (%s).\n", music_error( s_mrc ), song );
+  if ( !shown ) printf( "The slideshow could not start: %s (a picture needs 63K or EMS).\n", slide_fail_note( ) );
   printf( "%d picture%s shown from %s.\n", shown, shown == 1 ? "" : "s", s_dir );
   return 0;
 }

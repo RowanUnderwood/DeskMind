@@ -14,6 +14,8 @@ struct SlideOpts {
   int shuffle;        // 1 = random order
   int loop;           // 1 = start again after the last picture
   void ( *poll )( void );   // called while a picture shows (the jukebox: next song), or 0
+  int ( *begin )( void );   // called once the picture buffer is there (starts the music), or 0;
+  int begun;                // ... its result, set by slide_run (0 when it wasn't called)
 };
 
 // Fills out (80 chars) with the path of picture i; returns 0 if there is none
@@ -25,9 +27,12 @@ void slide_transition( int effect, const unsigned char far *img );
 // Play order: count-1..0 (the lists are newest first, so oldest first), or shuffled (with `start` first when it is a valid index)
 void slide_make_order( int *order, int count, int start, int shuffle );
 const char *slide_effect_name( int effect );
-// Where the next slideshow's picture buffer would go: "in EMS", "fits", or "needs 63K"
-// (call ems_init first for EMS).  slide_no_ems = 1 keeps it out of EMS.
+// Where the next slideshow's picture buffer would go: "in EMS", "fits", or "needs 63K", with
+// "EMS error XXh, " first when there is EMS but it failed (it really allocates and maps the
+// pages to find out; call ems_init first).  slide_no_ems = 1 keeps it out of EMS.
 const char *slide_mem_note( void );
+// Why the last slide_run showed nothing ("" if it did), e.g. "EMS error 80h, 41K free of 63K"
+const char *slide_fail_note( void );
 extern int slide_no_ems;
 
 #endif

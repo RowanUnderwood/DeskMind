@@ -88,7 +88,9 @@ TROUBLE?
   "No network"                  boot with W
   "MindServer is not answering" start it on the PC; check F5 Settings
   "Qwen ... is not running"     start NInfer on the PC (after a clean boot)
-  "Not enough memory" (slides)  start a new chat or restart DeskMind
+  "Slideshow could not start"  the reason is in brackets; without EMS it
+                                needs 63K: restart DeskMind. SLIDES /LIST
+                                says if the EMS buffer works
   "The music composer is not running"  start it in MindServer (Services)
 
 The full guide is README.md in the "DOS 286 generative AI applications"

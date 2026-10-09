@@ -183,15 +183,32 @@ static int s_bufEms = -1;
 static unsigned s_bufSeg = 0;
 
 static unsigned buf_size( void ) { return vid_is_cga( ) ? 16000u : 64000u; }
+// Long math: 64000 + 16383 overflows 16 bits, and 0.8.4-0.9.0 asked EMS for 0 pages (error 89h),
+// so every slideshow quietly fell back to a 63K DOS block
+static unsigned buf_pages( void ) { return (unsigned)( ( buf_size( ) + 16383ul ) / 16384ul ); }
+
+static int s_emsFail = 0;            // AH of the EMS call that failed in the last try, 0 = none
+static char s_fail[48] = "";
+
+// The largest free DOS block, in paragraphs
+static unsigned dos_free( void ) {
+  union REGS r;
+  r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
+  return r.w.bx;
+}
 
 static unsigned char far *buf_alloc( void ) {
   unsigned size = buf_size( );
-  unsigned pages = ( size + 16383u ) / 16384u;
-  if ( !slide_no_ems && ( s_bufEms = ems_alloc( pages ) ) >= 0 ) {
-    unsigned char far *p = ems_frame_map( s_bufEms, pages );
-    if ( p ) return p;
-    ems_free( s_bufEms );
-    s_bufEms = -1;
+  unsigned pages = buf_pages( );
+  s_emsFail = 0;
+  if ( !slide_no_ems && ems_init( ) > 0 ) {
+    if ( ( s_bufEms = ems_alloc( pages ) ) >= 0 ) {
+      unsigned char far *p = ems_frame_map( s_bufEms, pages );
+      if ( p ) return p;
+      ems_free( s_bufEms );
+      s_bufEms = -1;
+    }
+    s_emsFail = ems_err;
   }
   if ( _dos_allocmem( ( size + 15u ) >> 4, &s_bufSeg ) == 0 ) return (unsigned char far *)MK_FP( s_bufSeg, 0 );
   s_bufSeg = 0;
@@ -204,23 +221,42 @@ static void buf_free( void ) {
 }
 
 const char *slide_mem_note( void ) {
-  static char t[24];
-  unsigned pages = ( buf_size( ) + 16383u ) / 16384u;
-  if ( !slide_no_ems && ems_init( ) >= (int)pages ) return "in EMS";
-  union REGS r;
-  r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
-  if ( r.w.bx >= ( ( buf_size( ) + 15u ) >> 4 ) ) return "fits";
-  sprintf( t, "needs %uK", ( buf_size( ) + 1023u ) / 1024u );
+  static char t[40];
+  t[0] = 0;
+  unsigned pages = buf_pages( );
+  if ( !slide_no_ems && ems_init( ) > 0 ) {
+    // A real try: the free-page count alone doesn't prove the pages can be allocated and mapped
+    int hnd = ems_alloc( pages );
+    int ok = hnd >= 0 && ems_frame_map( hnd, pages ) != 0;
+    int err = ems_err;
+    ems_free( hnd );
+    if ( ok ) return "in EMS";
+    sprintf( t, "EMS error %02Xh, ", err );
+  }
+  if ( dos_free( ) >= ( ( buf_size( ) + 15u ) >> 4 ) ) strcat( t, "fits" );
+  else sprintf( t + strlen( t ), "needs %uK", ( buf_size( ) + 1023u ) / 1024u );
   return t;
 }
 
+const char *slide_fail_note( void ) { return s_fail; }
+
 int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts *o ) {
-  if ( count <= 0 ) return 0;
+  o->begun = 0;
+  s_fail[0] = 0;
+  if ( count <= 0 ) { strcpy( s_fail, "no pictures" ); return 0; }
   s_pal = s_bg = -1;
   int *order = (int *)malloc( sizeof( int ) * count );
-  if ( !order ) return 0;
+  if ( !order ) { strcpy( s_fail, "no memory for the play order" ); return 0; }
   unsigned char far *buf = buf_alloc( );
-  if ( !buf ) { free( order ); return 0; }
+  if ( !buf ) {
+    unsigned k = ( buf_size( ) + 1023u ) / 1024u;
+    if ( s_emsFail ) sprintf( s_fail, "EMS error %02Xh, %uK free of %uK", s_emsFail, dos_free( ) / 64u, k );
+    else sprintf( s_fail, "%uK free of %uK", dos_free( ) / 64u, k );
+    free( order );
+    return 0;
+  }
+  // The music starts now, so its song buffer can't take the memory the pictures need
+  if ( o->begin ) o->begun = o->begin( );
   slide_make_order( order, count, start, o->shuffle );
   int pos = 0;
   if ( !o->shuffle ) pos = ( start >= 0 && start < count ) ? count - 1 - start : 0;
@@ -320,5 +356,6 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
   }
   buf_free( );
   free( order );
+  if ( !shown ) strcpy( s_fail, "no picture could be read" );
   return shown;
 }

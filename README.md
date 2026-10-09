@@ -272,7 +272,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 | "MindServer is not answering" | Start `START-MINDSERVER.bat` on the PC. Check the address in Settings, and run `setup-firewall.bat` once |
 | "Qwen (NInfer) is not running on the MindServer PC" | Start NInfer after a clean boot of the PC (it needs the 5090's memory), or wait until it has loaded |
 | "The music composer is ... not running on the PC" | Start the music worker (MindServer's Services tab, or `START-MINDSERVER.bat`) |
-| "Not enough memory for the slideshow" | Without EMS the slideshow needs 63K of DOS memory. Start a new chat or restart DeskMind |
+| "The slideshow could not start (...)" | The brackets say why, e.g. "EMS error 80h, 41K free of 63K". With working EMS a slideshow needs no DOS memory; without it, 63K. Start a new chat or restart DeskMind. Help > About and `SLIDES /LIST` test EMS for real |
 | Colours look off | Brown (colour 6) differs between monitors. Change it in MindServer's Tandy tab. Pictures made after that use it |
 
 ---

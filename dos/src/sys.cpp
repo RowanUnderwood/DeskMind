@@ -44,6 +44,7 @@ void wait_ticks( unsigned n ) {
 // ---------------------------------------------------------------- EMS
 
 static unsigned s_frame = 0;
+int ems_err = 0;
 
 int ems_init( void ) {
   // An EMM driver's device header is named "EMMXXXX0"
@@ -63,11 +64,12 @@ int ems_init( void ) {
 }
 
 int ems_alloc( unsigned pages ) {
-  if ( !s_frame ) return -1;
+  if ( !s_frame ) { ems_err = 0xFF; return -1; }
   union REGS r;
   r.h.ah = 0x43; r.w.bx = pages;
   int86( 0x67, &r, &r );
-  return r.h.ah ? -1 : (int)r.w.dx;
+  if ( r.h.ah ) { ems_err = r.h.ah; return -1; }
+  return (int)r.w.dx;
 }
 
 void ems_free( int handle ) {
@@ -107,12 +109,12 @@ int ems_read( int handle, unsigned long offset, void far *dst, unsigned len ) {
 }
 
 unsigned char far *ems_frame_map( int handle, unsigned pages ) {
-  if ( !s_frame || pages > 4 ) return 0;
+  if ( !s_frame || pages > 4 ) { ems_err = 0xFF; return 0; }
   for ( unsigned i = 0; i < pages; i++ ) {
     union REGS r;
     r.h.ah = 0x44; r.h.al = (unsigned char)i; r.w.bx = i; r.w.dx = (unsigned)handle;
     int86( 0x67, &r, &r );
-    if ( r.h.ah ) return 0;
+    if ( r.h.ah ) { ems_err = r.h.ah; return 0; }
   }
   return (unsigned char far *)MK_FP( s_frame, 0 );
 }
