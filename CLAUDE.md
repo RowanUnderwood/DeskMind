@@ -160,7 +160,7 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
 - Slideshow order (0.8.4): without random, pictures play **oldest first, newest last**, then loop (`slide_make_order` reverses
   the newest-first lists; the Gallery starts at the selected picture and goes on to newer ones). Counter "n/total" = the
   n-th oldest (`count - order[pos]`), also in random order. `SLIDES /LIST` says "oldest first" (checked in DOSBox).
-  On the card 2026-10-09 (backups `..._before/after-deskmind-084.img`); real-TL/3 slideshow check pending.
+  On the card 2026-10-09 (backups `..._before/after-deskmind-084.img`); user confirmed the new order on the real TL/3 (2026-10-09).
 - Limits never fail silently now:
   - Gallery `MAX_PICS` 500, picker 200, chat list 100: all keep the **newest** entries when full (DOS returns files in
     folder order) and say "newest N of M".
