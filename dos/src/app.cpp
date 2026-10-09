@@ -293,12 +293,12 @@ void app_about( void ) {
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
   sprintf( t, "DeskMind 0.8.4 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen and draw with Krea 2 through "
-              "MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK. "
+              "MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK, slideshow %s. "
               "Built with Open Watcom and mTCP (GPLv3). "
               "Limits: the Gallery shows the newest 500 pictures, Chats lists the newest 100. "
               "A chat holds about 40,000 characters (300 messages); then Continue hides the "
               "older part, which stays saved.",
-           cfg_cga ? " (CGA mode now)" : "", cfg.server, cfg.port, app_pc( ), ip, r.w.bx / 64, app_ems * 16 );
+           cfg_cga ? " (CGA mode now)" : "", cfg.server, cfg.port, app_pc( ), ip, r.w.bx / 64, app_ems * 16, slide_mem_note( ) );
   msg_box( "About DeskMind", t, "OK" );
 }
 

@@ -11,6 +11,7 @@
 //   /R         random order
 //   /NOTITLE   no title strip
 //   /ONCE      stop after the last picture (default: loop)
+//   /NOEMS     keep the picture buffer out of EMS (it uses 63K of DOS memory then)
 //
 // Keys: Space/Enter/Right next, Left back, P pause, T titles, E try effects, Esc quit.
 
@@ -45,7 +46,7 @@ static int path_of( void *, int i, char *out ) {
 
 static void usage( void ) {
   printf( "SLIDES - DeskMind slideshow for the Tandy 1000 SL/TL/RL (640x200x16) and CGA PCs\n\n"
-          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA]\n\n"
+          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA] [/NOEMS]\n\n"
           "  /CGA: CGA pictures (automatic on a PC without Tandy Video II)\n"
           "  /R: random order (or tick \"Slideshow: random order\" in DeskMind's Settings)\n"
           "  /LIST: print the play order and exit\n"
@@ -89,6 +90,7 @@ int main( int argc, char *argv[] ) {
     else if ( str_ieq( a, "/BENCH" ) ) bench = 1;
     else if ( str_ieq( a, "/LIST" ) ) listOnly = 1;
     else if ( str_ieq( a, "/NOMOUSE" ) ) noMouse = 1;
+    else if ( str_ieq( a, "/NOEMS" ) ) slide_no_ems = 1;
     else if ( str_ieq( a, "/CGA" ) ) ;
     else if ( a[0] != '/' ) str_copy( s_dir, a, sizeof( s_dir ) );
     else { printf( "Unknown option %s\n\n", a ); usage( ); return 1; }
@@ -130,6 +132,7 @@ int main( int argc, char *argv[] ) {
     return 0;
   }
 
+  if ( !slide_no_ems ) ems_init( );   // the picture buffer goes into EMS when there is some
   int gmode = cfg_cga ? VM_CGA2 : VM_640;
   int r = vid_reserve( gmode );       // nothing to reserve for CGA
   if ( r ) { printf( "Cannot use 640x200 graphics: %s\n", vid_reserve_error( r ) ); return 1; }
@@ -160,9 +163,10 @@ int main( int argc, char *argv[] ) {
     if ( f ) fclose( f );
     return 0;
   }
-  int shown = slide_run( s_n, 0, path_of, 0, &o );
+  int shown = slide_run( s_n, -1, path_of, 0, &o );   // -1: from the oldest (or random)
   vid_close( );
   vid_unreserve( );
+  if ( !shown ) printf( "Not enough memory for the picture buffer (slideshow %s).\n", slide_mem_note( ) );
   printf( "%d picture%s shown from %s.\n", shown, shown == 1 ? "" : "s", s_dir );
   return 0;
 }

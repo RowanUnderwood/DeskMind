@@ -45,6 +45,8 @@ void ems_free( int handle );
 // Copy between a far buffer and an EMS handle at a byte offset (any size)
 int  ems_write( int handle, unsigned long offset, const void far *src, unsigned len );
 int  ems_read( int handle, unsigned long offset, void far *dst, unsigned len );
+// Maps logical pages 0..pages-1 (at most 4) to the whole page frame; returns the frame, or 0
+unsigned char far *ems_frame_map( int handle, unsigned pages );
 
 // ---------------------------------------------------------------- strings
 void str_copy( char *dst, const char *src, unsigned size );   // always terminates

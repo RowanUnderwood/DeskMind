@@ -106,6 +106,17 @@ int ems_read( int handle, unsigned long offset, void far *dst, unsigned len ) {
   return ems_copy( handle, offset, dst, len, 0 );
 }
 
+unsigned char far *ems_frame_map( int handle, unsigned pages ) {
+  if ( !s_frame || pages > 4 ) return 0;
+  for ( unsigned i = 0; i < pages; i++ ) {
+    union REGS r;
+    r.h.ah = 0x44; r.h.al = (unsigned char)i; r.w.bx = i; r.w.dx = (unsigned)handle;
+    int86( 0x67, &r, &r );
+    if ( r.h.ah ) return 0;
+  }
+  return (unsigned char far *)MK_FP( s_frame, 0 );
+}
+
 // ---------------------------------------------------------------- strings
 
 void str_copy( char *dst, const char *src, unsigned size ) {

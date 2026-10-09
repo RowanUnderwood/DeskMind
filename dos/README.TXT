@@ -13,7 +13,7 @@ STARTING
   Without WiFi DeskMind starts offline: Gallery and slideshow still work.
   First time: press F5 (Settings) and check the MindServer address/port.
   DESKMIND /NONET = start offline     DESKMIND /NOMOUSE = keyboard only
-  DESKMIND /CGA   = CGA mode (below)
+  DESKMIND /CGA   = CGA mode (below)  DESKMIND /NOEMS = slideshow not in EMS
 
 CGA MODE (DESKMIND /CGA, automatic on a PC without Tandy 1000 SL/TL video)
   For a plain 286 with a CGA card; on the Tandy it is a way to try it out.
@@ -53,12 +53,13 @@ GALLERY (F4)
   Shows the newest 500 pictures.
 
 SLIDESHOW (F6, or SLIDES from DOS - no network needed)
-  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]
+  SLIDES [folder] [/D secs] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS]
     /E  0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds, 5 interlace,
         6 dissolve, 7 box out, 8 box in, 9 slide in
     /R  random order       /CGA  CGA pictures (automatic on a non-Tandy PC)
   Space/Right next, Left back, P pause, T titles, E try effects, Esc quit.
   Plays oldest first, newest last, then loops. "7/16" = the 7th-oldest.
+  The picture buffer goes into EMS when there is some (else 63K DOS memory).
 
 FILES
   DESKMIND.CFG   settings           PICS\*.TPI   pictures (about 68K each)

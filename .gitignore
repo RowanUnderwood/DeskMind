@@ -23,6 +23,8 @@ helper/settings.json.tmp
 # 86Box VM: disk image, NVRAM, screenshots, test data, third-party packet drivers
 vm/dm_test.img
 vm/dm_sl2/nvr/
+vm/dm_ems.img
+vm/dm_ems/nvr/
 vm/shots/
 vm/files/DMTEST/PICS/
 vm/files/DMTEST/CHATS/

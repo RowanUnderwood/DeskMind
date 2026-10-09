@@ -1,6 +1,6 @@
 // DeskMind - generative AI for the Tandy 1000 TL/3 (and CGA PCs).
 //
-//   DESKMIND [/NONET] [/NOMOUSE] [/CGA]
+//   DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS]   (/NOEMS: slideshow picture buffer not in EMS)
 //
 // /CGA forces CGA mode (640x200 black and white, CGA pictures in PICSCGA); any PC
 // without Tandy video uses it anyway.
@@ -23,6 +23,7 @@
 #include "cfg.h"
 #include "net.h"
 #include "tpi.h"
+#include "slide.h"
 
 enum { M_ABOUT = 300, M_SETTINGS, M_EXIT,
        M_CHAT, M_CHAT_NEW, M_CHAT_OPEN, M_CHAT_ATTACH,
@@ -131,8 +132,9 @@ int main( int argc, char *argv[] ) {
     if ( str_ieq( argv[i], "/NONET" ) ) noNet = 1;
     else if ( str_ieq( argv[i], "/NOMOUSE" ) ) noMouse = 1;
     else if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
+    else if ( str_ieq( argv[i], "/NOEMS" ) ) slide_no_ems = 1;
     else if ( argv[i][0] == '/' || argv[i][0] == '?' ) {
-      printf( "DESKMIND [/NONET] [/NOMOUSE] [/CGA]\n" );
+      printf( "DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS]\n" );
       return 0;
     }
   }
@@ -152,7 +154,7 @@ int main( int argc, char *argv[] ) {
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( cfg_cga ? "DeskMind 0.8.4 (CGA)\n" : "DeskMind 0.8.3\n" );
+  printf( cfg_cga ? "DeskMind 0.8.4 (CGA)\n" : "DeskMind 0.8.4\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );

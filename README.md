@@ -70,7 +70,8 @@ and starts it. Without WiFi, DeskMind starts offline: the Gallery and slideshow 
 
 The first time, open **Settings (F5)** and check the MindServer address (this PC's LAN IP, e.g. `192.168.2.192`) and port `8286`.
 
-Options: `DESKMIND /NONET` (start offline), `DESKMIND /NOMOUSE` (keyboard only), `DESKMIND /CGA` (CGA mode, below).
+Options: `DESKMIND /NONET` (start offline), `DESKMIND /NOMOUSE` (keyboard only), `DESKMIND /CGA` (CGA mode, below),
+`DESKMIND /NOEMS` (keep the slideshow's picture buffer out of EMS).
 
 ### CGA mode (for a plain 286 with CGA)
 
@@ -157,7 +158,7 @@ Saved in `C:\DESKMIND\DESKMIND.CFG`.
 In DeskMind: **F6**, the Gallery's **Slideshow** button, or Pictures > Slideshow. From DOS: **`SLIDES`**.
 
 ```
-SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]
+SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS]
 
   folder     default: DeskMind's PICS folder
   /D n       seconds per picture (default from DeskMind's Settings, else 8)
@@ -167,6 +168,7 @@ SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]
   /NOTITLE   no title strip
   /ONCE      stop after the last picture (default: loop)
   /LIST      print the play order and exit
+  /NOEMS     keep the picture buffer out of EMS (it then needs 63K of DOS memory)
 ```
 
 | Key | |
@@ -191,6 +193,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 |---|---|---|
 | Pictures in the Gallery | 500 | The newest 500 show, with "Showing the newest 500 of N". Sync stops when the Gallery is full |
 | Pictures in SLIDES | 500 | The newest 500 play |
+| Memory | Help > About shows free DOS memory, EMS, and where a slideshow would go | The slideshow's 63K picture buffer goes into EMS when there is some (the Tandy has 4 MB), so it costs no DOS memory. "slideshow needs 63K" means it won't start now |
 | Pictures in the "attach a picture" list | 200 | The newest 200 are listed |
 | Saved chats in the Chats list | 100 | The newest 100 are listed, with "newest 100 of N" |
 | One chat on screen | about 40,000 characters, 300 messages | Notice when nearly full. Then Continue (hide the older part) or New |
@@ -220,7 +223,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 | "No network ... DeskMind starts offline" | Boot with **W**. The packet driver only loads in the WiFi boot |
 | "MindServer is not answering" | Start `START-MINDSERVER.bat` on the PC. Check the address in Settings, and run `setup-firewall.bat` once |
 | "Qwen (NInfer) is not running on the MindServer PC" | Start NInfer after a clean boot of the PC (it needs the 5090's memory), or wait until it has loaded |
-| "Not enough memory for the slideshow" | The slideshow needs 64K. Start a new chat or restart DeskMind |
+| "Not enough memory for the slideshow" | Without EMS the slideshow needs 63K of DOS memory. Start a new chat or restart DeskMind |
 | Colours look off | Brown (colour 6) differs between monitors. Change it in MindServer's Tandy tab. Pictures made after that use it |
 
 ---

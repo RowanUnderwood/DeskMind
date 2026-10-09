@@ -161,6 +161,24 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   the newest-first lists; the Gallery starts at the selected picture and goes on to newer ones). Counter "n/total" = the
   n-th oldest (`count - order[pos]`), also in random order. `SLIDES /LIST` says "oldest first" (checked in DOSBox).
   On the card 2026-10-09 (backups `..._before/after-deskmind-084.img`); user confirmed the new order on the real TL/3 (2026-10-09).
+- **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
+  AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
+  mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports
+  the real headroom after a slideshow. Not yet measured in W (online) mode, where mTCP's buffers (~54K: 20 packet buffers,
+  10 send buffers, 8K receive) should come off these figures. EMS: 4080K free, unused. Put big new data in EMS.
+  W boot (online): **83K** at startup, **60K** after a chat with a drawing: below the 64K that a heap slideshow buffer needed.
+- **Slideshow buffer in EMS (0.8.4, 2026-10-09).** `slide.cpp` `buf_alloc()` maps 4 EMS pages over the whole page frame
+  (`ems_frame_map`, D000 on the Tandy) and reads pictures straight into it; no EMS -> an exact `_dos_allocmem` block, freed
+  afterwards. Measured in DOSBox: a 64000-byte `_fmalloc` took **101,552** bytes from DOS (Watcom grows its last heap segment
+  to 64K, then adds a new 64K one) and `_fheapshrink` didn't give it back. `_heapwalk`/`_fheapwalk` return `_HEAPBADBEGIN`
+  in this OW snapshot (same bug as `_heapchk`), so heap-internal free space can't be measured. About now adds "slideshow
+  in EMS / fits / needs 63K" (`slide_mem_note`). `/NOEMS` on DESKMIND and SLIDES keeps the buffer out of EMS.
+  Same release fixes a start bug from the order change: SLIDES passed start 0 (= newest), so it began on the newest
+  and `/ONCE` stopped after one picture. SLIDES now passes -1; the Gallery passes `s_sel` only if it is > 0 or random.
+  86Box `vm\dm_ems` (SL/2 + Lo-tech EMS, `[Other peripherals]` frame C0000 because XT-IDE's ROM is at D000; LTEMM.EXE
+  /p:C000 /i:260 in CONFIG.SYS, image `vm\dm_ems.img` made from dm_test.img): SLIDES from EMS and with /NOEMS both
+  play 6/6 oldest first; MEM conventional and EMS free identical before and after. 86Box crashed (0x53dee3) on some runs.
+  On the card (backups `..._before/after-deskmind-084-ems.img`); About and the real-TL/3 slideshow from EMS still to check.
 - Limits never fail silently now:
   - Gallery `MAX_PICS` 500, picker 200, chat list 100: all keep the **newest** entries when full (DOS returns files in
     folder order) and say "newest N of M".

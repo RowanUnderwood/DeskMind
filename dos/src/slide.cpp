@@ -174,13 +174,53 @@ void slide_make_order( int *order, int count, int start, int shuffle ) {
   }
 }
 
+// The picture buffer (64000 bytes, CGA 16000) lives in the EMS page frame when there is EMS,
+// so it costs no conventional memory.  Otherwise it is an exact DOS block, freed afterwards:
+// from the C heap it cost about 100K the first time (the heap first grows its last segment to
+// 64K, then adds a new one) and the heap never gave it back.
+int slide_no_ems = 0;
+static int s_bufEms = -1;
+static unsigned s_bufSeg = 0;
+
+static unsigned buf_size( void ) { return vid_is_cga( ) ? 16000u : 64000u; }
+
+static unsigned char far *buf_alloc( void ) {
+  unsigned size = buf_size( );
+  unsigned pages = ( size + 16383u ) / 16384u;
+  if ( !slide_no_ems && ( s_bufEms = ems_alloc( pages ) ) >= 0 ) {
+    unsigned char far *p = ems_frame_map( s_bufEms, pages );
+    if ( p ) return p;
+    ems_free( s_bufEms );
+    s_bufEms = -1;
+  }
+  if ( _dos_allocmem( ( size + 15u ) >> 4, &s_bufSeg ) == 0 ) return (unsigned char far *)MK_FP( s_bufSeg, 0 );
+  s_bufSeg = 0;
+  return 0;
+}
+
+static void buf_free( void ) {
+  if ( s_bufEms >= 0 ) { ems_free( s_bufEms ); s_bufEms = -1; }
+  if ( s_bufSeg ) { _dos_freemem( s_bufSeg ); s_bufSeg = 0; }
+}
+
+const char *slide_mem_note( void ) {
+  static char t[24];
+  unsigned pages = ( buf_size( ) + 16383u ) / 16384u;
+  if ( !slide_no_ems && ems_init( ) >= (int)pages ) return "in EMS";
+  union REGS r;
+  r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
+  if ( r.w.bx >= ( ( buf_size( ) + 15u ) >> 4 ) ) return "fits";
+  sprintf( t, "needs %uK", ( buf_size( ) + 1023u ) / 1024u );
+  return t;
+}
+
 int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts *o ) {
   if ( count <= 0 ) return 0;
   s_pal = s_bg = -1;
-  unsigned char far *buf = (unsigned char far *)_fmalloc( vid_is_cga( ) ? 16000u : 64000u );
-  if ( !buf ) return 0;
   int *order = (int *)malloc( sizeof( int ) * count );
-  if ( !order ) { _ffree( buf ); return 0; }
+  if ( !order ) return 0;
+  unsigned char far *buf = buf_alloc( );
+  if ( !buf ) { free( order ); return 0; }
   slide_make_order( order, count, start, o->shuffle );
   int pos = 0;
   if ( !o->shuffle ) pos = ( start >= 0 && start < count ) ? count - 1 - start : 0;
@@ -277,7 +317,7 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
     if ( atEnd && !o->loop ) break;
     pos = next;
   }
+  buf_free( );
   free( order );
-  _ffree( buf );
   return shown;
 }

@@ -387,12 +387,13 @@ void gallery_slideshow( void ) {
   o.effect = cfg.slide_effect;
   o.titles = 1; o.shuffle = cfg.slide_shuffle; o.loop = 1;
   gui_mouse_hide( );
-  int shown = slide_run( s_n, s_sel, slide_path, 0, &o );
+  // Oldest first; a picture picked further down the list (or any, in random order) plays first
+  int shown = slide_run( s_n, ( o.shuffle || s_sel > 0 ) ? s_sel : -1, slide_path, 0, &o );
   app_gui_mode( );
   gui_mouse_show( );
   if ( !shown ) {
     app_redraw( );
-    msg_box( "Slideshow", "Not enough memory for the slideshow (it needs 64K). Close the chat or restart DeskMind.", "OK" );
+    msg_box( "Slideshow", "Not enough memory for the slideshow (it needs 63K, or EMS). Close the chat or restart DeskMind.", "OK" );
   }
   else app_redraw( );
   app_status( "Slideshow: %d picture%s shown.", shown, shown == 1 ? "" : "s" );
