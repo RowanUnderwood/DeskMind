@@ -21,7 +21,7 @@ typedef int ( *slide_path_fn )( void *ctx, int i, char *out );
 // Runs until Esc, a mouse click, or the end (when !loop).  Returns the number of pictures shown.
 int  slide_run( int count, int start, slide_path_fn path, void *ctx, SlideOpts *o );
 void slide_transition( int effect, const unsigned char far *img );
-// Play order: 0..count-1, or shuffled (with `start` first when it is a valid index)
+// Play order: count-1..0 (the lists are newest first, so oldest first), or shuffled (with `start` first when it is a valid index)
 void slide_make_order( int *order, int count, int start, int shuffle );
 const char *slide_effect_name( int effect );
 

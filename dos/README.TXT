@@ -1,4 +1,4 @@
-DESKMIND 0.8.3 - AI chat and pictures for the Tandy 1000 TL/3 (and CGA)
+DESKMIND 0.8.4 - AI chat and pictures for the Tandy 1000 TL/3 (and CGA)
 ===========================================================================
 
 DeskMind talks over the PicoMEM WiFi to MindServer on the PC, which runs
@@ -58,7 +58,7 @@ SLIDESHOW (F6, or SLIDES from DOS - no network needed)
         6 dissolve, 7 box out, 8 box in, 9 slide in
     /R  random order       /CGA  CGA pictures (automatic on a non-Tandy PC)
   Space/Right next, Left back, P pause, T titles, E try effects, Esc quit.
-  "7/16" in the title strip = the 7th-newest picture, as in the Gallery.
+  Plays oldest first, newest last, then loops. "7/16" = the 7th-oldest.
 
 FILES
   DESKMIND.CFG   settings           PICS\*.TPI   pictures (about 68K each)

@@ -157,7 +157,10 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
 - `README.md` (full user guide) and `dos\README.TXT` (80-column CRLF version in `C:\DESKMIND`).
 - Launchers go through the parent pipeline (see "Which parent rules apply"). `tools\card_install.ps1 -Also PLAY` lets an
   install change other root folders; a file spec `src=PLAY/NAME` goes to `C:\PLAY\NAME`.
-- Slideshow counter: "n/total" is the picture's place in the newest-first list (`order[pos] + 1`), also in random order.
+- Slideshow order (0.8.4): without random, pictures play **oldest first, newest last**, then loop (`slide_make_order` reverses
+  the newest-first lists; the Gallery starts at the selected picture and goes on to newer ones). Counter "n/total" = the
+  n-th oldest (`count - order[pos]`), also in random order. `SLIDES /LIST` says "oldest first" (checked in DOSBox).
+  On the card 2026-10-09 (backups `..._before/after-deskmind-084.img`); real-TL/3 slideshow check pending.
 - Limits never fail silently now:
   - Gallery `MAX_PICS` 500, picker 200, chat list 100: all keep the **newest** entries when full (DOS returns files in
     folder order) and say "newest N of M".

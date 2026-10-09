@@ -124,7 +124,7 @@ int main( int argc, char *argv[] ) {
     int *order = (int *)malloc( sizeof( int ) * s_n );
     if ( !order ) return 1;
     slide_make_order( order, s_n, -1, o.shuffle );
-    printf( "%d pictures in %s, %s order:\n", s_n, s_dir, o.shuffle ? "random" : "newest first" );
+    printf( "%d pictures in %s, %s order:\n", s_n, s_dir, o.shuffle ? "random" : "oldest first" );
     for ( int i = 0; i < s_n; i++ ) printf( "%3d  %s\n", i + 1, s_e[ order[i] ].name );
     free( order );
     return 0;

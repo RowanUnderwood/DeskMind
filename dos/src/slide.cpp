@@ -160,11 +160,12 @@ void slide_make_order( int *order, int count, int start, int shuffle ) {
     srand( (unsigned)ticks( ) ^ pit );
     seeded = 1;
   }
-  for ( int i = 0; i < count; i++ ) order[i] = i;
+  // The lists are newest first; play them oldest first, newest last
+  for ( int i = 0; i < count; i++ ) order[i] = count - 1 - i;
   if ( !shuffle ) return;
   int lo = 0;
   if ( start >= 0 && start < count ) {           // the chosen picture first, the rest shuffled
-    order[0] = start; order[start] = 0;
+    order[count - 1 - start] = order[0]; order[0] = start;
     lo = 1;
   }
   for ( int i = count - 1; i > lo; i-- ) {
@@ -182,7 +183,7 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
   if ( !order ) { _ffree( buf ); return 0; }
   slide_make_order( order, count, start, o->shuffle );
   int pos = 0;
-  if ( !o->shuffle ) pos = ( start >= 0 && start < count ) ? start : 0;
+  if ( !o->shuffle ) pos = ( start >= 0 && start < count ) ? count - 1 - start : 0;
 
   char path[80], curPath[80] = "";
   TpiHeader h;
@@ -222,7 +223,7 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
     str_copy( title, h.title[0] ? h.title : "(untitled)", sizeof( title ) );
 
     int titleOn = 0;
-    if ( o->titles ) { title_strip( title, order[pos] + 1, count, "" ); titleOn = 1; }
+    if ( o->titles ) { title_strip( title, count - order[pos], count, "" ); titleOn = 1; }
     unsigned long t0 = ticks( );
 
     // Preload the next one while this one is on screen
@@ -254,20 +255,20 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
       }
       else if ( k == 'p' || k == 'P' ) {
         paused = !paused;
-        title_strip( title, order[pos] + 1, count, paused ? "PAUSED  " : "" );
+        title_strip( title, count - order[pos], count, paused ? "PAUSED  " : "" );
         titleOn = 1; t0 = ticks( );
         if ( paused ) t0 = ticks( ) - 1;
       }
       else if ( k == 't' || k == 'T' ) {
         o->titles = !o->titles;
-        if ( o->titles ) { title_strip( title, order[pos] + 1, count, "" ); titleOn = 1; t0 = ticks( ); }
+        if ( o->titles ) { title_strip( title, count - order[pos], count, "" ); titleOn = 1; t0 = ticks( ); }
         else if ( titleOn ) { tpi_lines_to_screen( curPath, LINES - 11, 11 ); titleOn = 0; }
       }
       else if ( k == 'e' || k == 'E' ) {             // try the effects one after another
         o->effect = fxCycle;
         char ex[40];
         sprintf( ex, "Effect: %s   ", slide_effect_name( fxCycle ) );
-        title_strip( title, order[pos] + 1, count, ex );
+        title_strip( title, count - order[pos], count, ex );
         titleOn = 1; t0 = ticks( );
         fxCycle = fxCycle + 1 >= FX_COUNT ? FX_CUT : fxCycle + 1;
       }

@@ -178,8 +178,8 @@ SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST]
 | E | Try the effects one after another |
 | Esc, Q, mouse click | Quit |
 
-The title strip shows for 3 seconds. **"7/16" means the 7th-newest of 16 pictures**, the same order as the Gallery, even in
-random order.
+Pictures play oldest first, newest last, then start over (the Gallery slideshow starts at the selected picture and
+goes on to newer ones). The title strip shows for 3 seconds. **"7/16" means the 7th-oldest of 16 pictures**, even in random order.
 
 ---
 

@@ -93,7 +93,7 @@ static void sound_check( void ) {
     struct dostime_t t;
     _dos_getdate( &d );
     _dos_gettime( &t );
-    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.8.3 ===\n",
+    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.8.4 ===\n",
              s_f9Step, d.year, d.month, d.day, t.hour, t.minute, t.second );
     snd_diag( f );
     fclose( f );
@@ -152,7 +152,7 @@ int main( int argc, char *argv[] ) {
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( cfg_cga ? "DeskMind 0.8.3 (CGA)\n" : "DeskMind 0.8.3\n" );
+  printf( cfg_cga ? "DeskMind 0.8.4 (CGA)\n" : "DeskMind 0.8.3\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );

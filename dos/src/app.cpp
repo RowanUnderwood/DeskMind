@@ -292,7 +292,7 @@ void app_about( void ) {
   r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
-  sprintf( t, "DeskMind 0.8.3 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen and draw with Krea 2 through "
+  sprintf( t, "DeskMind 0.8.4 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen and draw with Krea 2 through "
               "MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK. "
               "Built with Open Watcom and mTCP (GPLv3). "
               "Limits: the Gallery shows the newest 500 pictures, Chats lists the newest 100. "
