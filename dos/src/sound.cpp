@@ -18,6 +18,7 @@ static volatile unsigned char s_vol = 15;
 static unsigned char s_old61 = 0;
 static unsigned s_start = 0, s_len = 0;    // snd_poll's watchdog: BIOS tick at start, ticks allowed
 volatile unsigned long snd_isr_count = 0;
+static volatile unsigned char s_music = 0;  // 1 = a song owns the chip (music.cpp): we write nothing
 
 // ---------------------------------------------------------------- diagnostics ring
 // The stuck-note hunt (0.8.x): what happened when, in BIOS ticks and tick-handler calls.
@@ -152,6 +153,7 @@ static void refresh( void ) {
 // speaker path), and the 86Box Tandy crashed ("Divide overflow") during disk writes.
 static void __interrupt __far tick_handler( void ) {
   snd_isr_count++;
+  if ( s_music ) _chain_intr( s_oldTick );    // the song's IRQ0 handler writes the chip now
   if ( s_seq ) {
     if ( s_left ) s_left--;
     if ( s_left == 0 ) {
@@ -193,7 +195,7 @@ void snd_done( void ) {
 }
 
 void snd_play( const SndNote *seq ) {
-  if ( !snd_enabled || !seq || !s_oldTick ) return;
+  if ( !snd_enabled || !seq || !s_oldTick || s_music ) return;
   unsigned len = 3;
   for ( const SndNote *n = seq; n->ticks; n++ ) len += n->ticks;
   _disable( );
@@ -295,7 +297,17 @@ void snd_stop( void ) {
   _disable( );
   if ( s_seq ) ring_put( SL_STOP, 0, 0 );
   s_seq = 0;
-  v_silence( );
+  if ( !s_music ) v_silence( );
+  _enable( );
+}
+
+// music.cpp's owner hook.  On: any effect stops and the tick handler leaves the chip alone
+// (refresh() would mute the song's voices 2 and 3 every tick).  Off: the song has muted the
+// chip; refresh() takes over again on the next tick.
+void snd_music( int on ) {
+  _disable( );
+  s_seq = 0;
+  s_music = (unsigned char)( on != 0 );
   _enable( );
 }
 

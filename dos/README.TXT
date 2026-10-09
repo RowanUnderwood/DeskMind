@@ -1,16 +1,18 @@
-DESKMIND 0.8.4 - AI chat and pictures for the Tandy 1000 TL/3 (and CGA)
+DESKMIND 0.9.0 - AI chat, pictures and music for the Tandy 1000 TL/3 (and CGA)
 ===========================================================================
 
 DeskMind talks over the PicoMEM WiFi to MindServer on the PC, which runs
-the Qwen AI (chat) and Krea 2 (drawing). Pictures come back ready to show
-in 640x200 with 16 colours.
+the Qwen AI (chat), Krea 2 (drawing) and MIDI-GPT (music). Pictures come
+back ready to show in 640x200 with 16 colours; songs play on the Tandy's
+3-voice sound chip with noise drums.
 
 STARTING
   1. On the PC: START-MINDSERVER.bat (NInfer wants a freshly booted PC).
   2. Boot the Tandy with W (WiFi).
   3. Type DESKMIND at any prompt.
 
-  Without WiFi DeskMind starts offline: Gallery and slideshow still work.
+  Online it greets you with a modem handshake (any key stops it); offline
+  with the old chime. Without WiFi the Gallery, slideshow and Music work.
   First time: press F5 (Settings) and check the MindServer address/port.
   DESKMIND /NONET = start offline     DESKMIND /NOMOUSE = keyboard only
   DESKMIND /CGA   = CGA mode (below)  DESKMIND /NOEMS = slideshow not in EMS
@@ -27,6 +29,7 @@ CGA MODE (DESKMIND /CGA, automatic on a PC without Tandy 1000 SL/TL video)
 
 KEYS
   F2 Chat   F3 Create   F4 Gallery   F5 Settings   F6 Slideshow
+  F7 Music  F8 Stop music
   F10 or Alt+letter = menus    Tab = next control    Enter = default button
   Esc = cancel a dialog, or stop a reply or drawing
 
@@ -36,6 +39,9 @@ CHAT (F2)
   ("draw a castle at sunset") and Qwen draws it. Click a thumbnail to see
   it full screen. Picture = attach a gallery picture and ask about it.
   Chats = reopen or delete saved chats.   New = fresh chat.
+  Ask for music ("make a spooky tune for the dungeon pictures") and a song
+  card arrives a few seconds later; it starts playing, click it to play or
+  stop it again. Styles: cracktro, adventure, dungeon.
   A chat holds about 40,000 characters. When it is full, Continue hides
   the older messages (they stay saved) and goes on.
 
@@ -54,6 +60,7 @@ GALLERY (F4)
 
 SLIDESHOW (F6, or SLIDES from DOS - no network needed)
   SLIDES [folder] [/D secs] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS]
+         [/M R|OFF|song]  music: random songs, none, or one song looped
     /E  0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds, 5 interlace,
         6 dissolve, 7 box out, 8 box in, 9 slide in
     /R  random order       /CGA  CGA pictures (automatic on a non-Tandy PC)
@@ -61,16 +68,28 @@ SLIDESHOW (F6, or SLIDES from DOS - no network needed)
   Plays oldest first, newest last, then loops. "7/16" = the 7th-oldest.
   The picture buffer goes into EMS when there is some (else 63K DOS memory).
 
+MUSIC (F7)
+  Your songs. Play = once, Loop = repeat it, Random = random songs one
+  after another, Stop (or F8 anywhere). Music keeps playing while you
+  chat or look at pictures; DeskMind's own sounds are quiet meanwhile.
+  Compose = ask Qwen in Chat. Sync = fetch songs made on the PC.
+  Rename, Delete (Everywhere = on MindServer too). 150 songs at most.
+  Settings (F5): "Music:" plays random songs, or the song you last played
+  (looped), during slideshows.
+
 FILES
   DESKMIND.CFG   settings           PICS\*.TPI   pictures (about 68K each)
   CHATS\*.TCH    chat transcripts   SLIDES.EXE   stand-alone slideshow
   PICSCGA\*.TPI  CGA pictures (about 17K each)
+  MUSIC\*.T3     songs (up to 30K)   MUSIC\SONGS.LST  song titles
+  MODEM.T3       the online startup sound
 
 TROUBLE?
   "No network"                  boot with W
   "MindServer is not answering" start it on the PC; check F5 Settings
   "Qwen ... is not running"     start NInfer on the PC (after a clean boot)
   "Not enough memory" (slides)  start a new chat or restart DeskMind
+  "The music composer is not running"  start it in MindServer (Services)
 
 The full guide is README.md in the "DOS 286 generative AI applications"
 folder on the PC. DeskMind uses mTCP and is GPLv3.

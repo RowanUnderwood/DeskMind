@@ -278,6 +278,7 @@ int slide_run( int count, int start, slide_path_fn pathOf, void *ctx, SlideOpts 
     // Wait, handling keys
     int advance = 0;
     while ( !advance && !quit ) {
+      if ( o->poll ) o->poll( );
       unsigned long el = ticks( ) - t0;
       if ( titleOn && el > 55 ) {                    // ~3 s, then repair the strip from the file
         tpi_lines_to_screen( curPath, LINES - 11, 11 );

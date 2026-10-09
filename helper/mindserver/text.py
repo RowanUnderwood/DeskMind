@@ -149,19 +149,20 @@ class Coalescer:
 
 
 class DrawSplitter:
-    """Separates '<draw>...</draw>' from visible text in a stream.
+    """Separates '<draw>...</draw>' (pictures) and '<music>...</music>' (songs) from visible text in a stream.
 
     Also accepts '[You drew picture <ID>: ...]': the form the chat history used to use for past drawings,
     which Qwen sometimes copied instead of writing a <draw> tag (nothing got drawn, and the line showed as
     text). It is treated as a draw request with the ID dropped."""
 
-    PAIRS = (("<draw>", "</draw>"), ("[you drew picture ", "]"))   # openers lower case: matching ignores case
+    PAIRS = (("<draw>", "</draw>"), ("[you drew picture ", "]"), ("<music>", "</music>"))   # openers lower case
     ID_PREFIX = re.compile(r"^\s*[0-9A-Za-z]{1,12}\s*:\s*")
 
     def __init__(self):
         self.buf = ""
         self.inside = None              # the closer we are waiting for, or None
         self.prompts: list[str] = []
+        self.music: list[str] = []      # <music> descriptions
         self.current = ""
 
     def _add(self, prompt: str, pair: int) -> None:
@@ -169,7 +170,7 @@ class DrawSplitter:
             prompt = self.ID_PREFIX.sub("", prompt, count=1)
         prompt = " ".join(prompt.split())
         if prompt:
-            self.prompts.append(prompt)
+            (self.music if pair == 2 else self.prompts).append(prompt)
 
     def feed(self, piece: str) -> str:
         """Returns the visible text from this piece (tag contents are collected)."""

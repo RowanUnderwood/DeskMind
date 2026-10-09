@@ -18,6 +18,9 @@ struct DmConfig {
   char pics[64];           // picture folder, e.g. C:\DESKMIND\PICS
   char pics_cga[64];       // picture folder in CGA mode (CGA pictures only), e.g. C:\DESKMIND\PICSCGA
   char chats[64];          // chat folder
+  char music[64];          // songs (*.T3 and SONGS.LST), e.g. C:\DESKMIND\MUSIC
+  int  slide_music;        // slideshow music: 0 off, 1 random songs, 2 slide_song looped
+  char slide_song[9];      // the song last played in the Music screen (its file name, no .T3)
 };
 
 extern DmConfig cfg;

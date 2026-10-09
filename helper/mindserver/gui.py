@@ -1,7 +1,7 @@
 """MindServer window (PySide6).  A native desktop window on purpose: a browser
 tab would take VRAM on GPU 0, which NInfer needs.
 
-Tabs: Services, Generation, Dither Lab, Gallery, AI, Tandy.
+Tabs: Services, Generation, Dither Lab, Gallery, Music, AI, Tandy.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .store import file_slug
 log = logging.getLogger("mindserver.gui")
 
 DOT = {"up": "#2ecc40", "down": "#ff4136", "unknown": "#aaaaaa"}
+NAMES = {"qwen": "NInfer", "comfy": "ComfyUI", "music": "the music worker"}
 EXPORT_DIR = os.path.join(PROJECT_DIR, "docs")
 
 
@@ -102,7 +103,8 @@ class ServicesTab(QWidget):
         g = QGridLayout(box)
         self.dots = {}
         rows = [("qwen", "NInfer / Qwen (RTX 5090)", win.config["qwen"]["url"]),
-                ("comfy", "ComfyUI / Krea2 (RTX 4090)", win.config["comfy"]["url"])]
+                ("comfy", "ComfyUI / Krea2 (RTX 4090)", win.config["comfy"]["url"]),
+                ("music", "Music worker / MIDI-GPT (RTX 3090)", win.config["music"]["url"])]
         for r, (key, name, url) in enumerate(rows):
             dot = QLabel("●")
             self.dots[key] = dot
@@ -115,12 +117,12 @@ class ServicesTab(QWidget):
             g.addWidget(b1, r, 3)
             g.addWidget(b2, r, 4)
         s = win.config["server"]
-        g.addWidget(QLabel("●"), 2, 0)
-        self.dot_server = g.itemAtPosition(2, 0).widget()
+        g.addWidget(QLabel("●"), 3, 0)
+        self.dot_server = g.itemAtPosition(3, 0).widget()
         self.dot_server.setStyleSheet(f"color: {DOT['up']}; font-size: 16px")
-        g.addWidget(QLabel(f"<b>MindServer {VERSION}</b>"), 2, 1)
-        g.addWidget(QLabel(f"port {s['port']}  (DeskMind connects here)"), 2, 2)
-        g.addWidget(QLabel("Qwen model for Start"), 3, 1)
+        g.addWidget(QLabel(f"<b>MindServer {VERSION}</b>"), 3, 1)
+        g.addWidget(QLabel(f"port {s['port']}  (DeskMind connects here)"), 3, 2)
+        g.addWidget(QLabel("Qwen model for Start"), 4, 1)
         self.model = QComboBox()
         self.model.addItem("thinkingcap (ThinkingCap fine-tune)", "thinkingcap")
         self.model.addItem("full (published NVFP4)", "full")
@@ -129,21 +131,21 @@ class ServicesTab(QWidget):
         self.model.setToolTip("Sets WIN_MODEL when MindServer or START-MINDSERVER starts NInfer.\n"
                               "A running NInfer keeps its model until it is stopped and started again.")
         self.model.currentIndexChanged.connect(self.model_changed)
-        g.addWidget(self.model, 3, 2)
+        g.addWidget(self.model, 4, 2)
         self.running = QLabel()
-        g.addWidget(self.running, 3, 3, 1, 3)
+        g.addWidget(self.running, 4, 3, 1, 3)
         note = QLabel("NInfer needs about 29 GB free on GPU 0 for thinkingcap (25 GB for full); "
                       "start it first, from a clean boot if it refuses.")
         note.setStyleSheet("color: #888")
-        g.addWidget(note, 4, 1, 1, 4)
+        g.addWidget(note, 5, 1, 1, 4)
         b_off = QPushButton("Shut down all")
-        b_off.setToolTip("Stop NInfer and ComfyUI, then close MindServer")
+        b_off.setToolTip("Stop NInfer, ComfyUI and the music worker, then close MindServer")
         b_off.clicked.connect(self.shutdown)
-        g.addWidget(b_off, 2, 3, 1, 2)
+        g.addWidget(b_off, 3, 3, 1, 2)
         g.setColumnMinimumWidth(1, 220)
         g.setColumnMinimumWidth(2, 260)
         for col in (3, 4):
-            for row in (0, 1):
+            for row in (0, 1, 2):
                 g.itemAtPosition(row, col).widget().setFixedWidth(90)
         g.setColumnStretch(5, 1)
         lay.addWidget(box)
@@ -200,7 +202,7 @@ class ServicesTab(QWidget):
             self.clients.addItem(f"{ip}   {int(now - seen)} s ago")
 
     def start(self, key):
-        name = "NInfer" if key == "qwen" else "ComfyUI"
+        name = NAMES[key]
         if self.win.server.services.status.get(key) == "up":
             log.info("%s is already running - not starting a second copy", name)
             return
@@ -208,21 +210,21 @@ class ServicesTab(QWidget):
         self.win.server.services.start(key)
 
     def stop(self, key):
-        if QMessageBox.question(self, "Stop", f"Stop {'NInfer' if key == 'qwen' else 'ComfyUI'}?") \
+        if QMessageBox.question(self, "Stop", f"Stop {NAMES[key]}?") \
                 == QMessageBox.StandardButton.Yes:
             log.info("stopping %s", key)
             self.win.server.services.stop(key)
 
     def shutdown(self):
         if QMessageBox.question(self, "Shut down all",
-                                "Stop NInfer and ComfyUI and close MindServer?\n"
+                                "Stop NInfer, ComfyUI and the music worker and close MindServer?\n"
                                 "The Tandy loses its connection until MindServer runs again.") \
                 != QMessageBox.StandardButton.Yes:
             return
         services = self.win.server.services
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            for key, name in (("qwen", "NInfer"), ("comfy", "ComfyUI")):
+            for key, name in NAMES.items():
                 if services.status.get(key) == "down":
                     log.info("%s is not running", name)
                 else:
@@ -806,6 +808,128 @@ class GalleryTab(QWidget):
 
 # ====================================================================== AI (Qwen)
 
+class MusicTab(QWidget):
+    """Songs made for the Tandy (helper\\data\\music): listen to the preview, rename, delete, compose."""
+
+    def __init__(self, win: "MainWindow"):
+        super().__init__()
+        self.win = win
+        self.music = win.server.music
+        lay = QVBoxLayout(self)
+        row = QHBoxLayout()
+        self.request = QLineEdit()
+        self.request.setPlaceholderText("Describe a song (mood, speed, style) - Qwen picks the settings")
+        self.request.returnPressed.connect(self.compose)
+        b = QPushButton("Compose")
+        b.clicked.connect(self.compose)
+        row.addWidget(self.request, 1)
+        row.addWidget(b)
+        lay.addLayout(row)
+        self.state = QLabel("")
+        lay.addWidget(self.state)
+        self.list = QListWidget()
+        self.list.itemDoubleClicked.connect(lambda _: self.play())
+        lay.addWidget(self.list, 1)
+        self.info = QLabel("")
+        self.info.setWordWrap(True)
+        self.info.setStyleSheet("color: #888")
+        lay.addWidget(self.info)
+        self.list.currentRowChanged.connect(self.show_info)
+        btns = QHBoxLayout()
+        for text, fn in (("Play preview", self.play), ("Stop", self.stop), ("Rename...", self.rename),
+                         ("Delete", self.delete), ("Open folder", self.open_folder), ("Refresh", self.refresh)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            btns.addWidget(b)
+        btns.addStretch(1)
+        lay.addLayout(btns)
+        note = QLabel("The preview is rendered from the exact register stream the Tandy plays "
+                      "(square waves and noise), not a General MIDI sound bank.")
+        note.setStyleSheet("color: #888")
+        lay.addWidget(note)
+        self.songs: list[dict] = []
+        self.job = None
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+        self.refresh()
+
+    def refresh(self):
+        self.songs = self.music.store.list()
+        self.list.clear()
+        for m in self.songs:
+            secs = round(m.get("report", {}).get("seconds", 0))
+            style = m.get("spec", {}).get("style", "")
+            self.list.addItem(f"{m.get('title', m['id'])}   ({secs // 60}:{secs % 60:02d}, {style}, "
+                              f"{m.get('created', '')[:16].replace('T', ' ')})")
+
+    def current(self) -> dict | None:
+        i = self.list.currentRow()
+        return self.songs[i] if 0 <= i < len(self.songs) else None
+
+    def show_info(self, _=None):
+        m = self.current()
+        if not m:
+            self.info.setText("")
+            return
+        r = m.get("report", {})
+        self.info.setText(f"{m['id']}: {r.get('style', '')} in {r.get('key', '?')}, {r.get('tempo', '?')} bpm, "
+                          f"{r.get('stream', {}).get('bytes', '?')} bytes.  Asked for: {m.get('request') or '(settings)'}")
+
+    def play(self):
+        import winsound
+        m = self.current()
+        if m:
+            winsound.PlaySound(self.music.store.path(m["id"], "wav"), winsound.SND_FILENAME | winsound.SND_ASYNC)
+
+    def stop(self):
+        import winsound
+        winsound.PlaySound(None, 0)
+
+    def rename(self):
+        m = self.current()
+        if not m:
+            return
+        t, ok = QInputDialog.getText(self, "Rename song", "Title:", text=m.get("title", ""))
+        if ok and t.strip():
+            self.music.store.set_title(m["id"], t)
+            self.refresh()
+
+    def delete(self):
+        m = self.current()
+        if m and QMessageBox.question(self, "Delete song", f"Delete \"{m.get('title')}\"?\n"
+                                      "A Tandy that has it keeps its copy.") == QMessageBox.StandardButton.Yes:
+            self.stop()
+            self.music.store.delete(m["id"])
+            self.refresh()
+
+    def open_folder(self):
+        os.startfile(self.music.store.folder)
+
+    def compose(self):
+        text = self.request.text().strip()
+        if not text or self.job is not None:
+            return
+        self.job = self.music.submit(text)
+        self.state.setText("Composing...")
+        self.timer.start(500)
+
+    def poll(self):
+        j = self.job
+        if j is None:
+            return
+        if j.status == "done":
+            self.state.setText(f"Made \"{j.title}\" ({j.music_id}).  The Tandy gets it with Sync in its Music screen.")
+        elif j.status == "error":
+            self.state.setText(f"<span style='color:#ff4136'>{j.error}</span>")
+        else:
+            self.state.setText(f"{j.stage}...")
+            return
+        self.timer.stop()
+        self.job = None
+        self.refresh()
+        self.list.setCurrentRow(0)
+
+
 class AITab(QWidget):
     """Qwen settings, the three prompts, and a test chat that shows exactly what the Tandy receives."""
 
@@ -1039,6 +1163,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.generation, "Generation")
         self.tabs.addTab(self.lab, "Dither Lab")
         self.tabs.addTab(self.gallery, "Gallery")
+        self.tabs.addTab(MusicTab(self), "Music")
         self.ai = AITab(self)
         self.tabs.addTab(self.ai, "AI")
         self.tabs.addTab(TandyTab(self), "Tandy")

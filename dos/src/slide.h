@@ -13,6 +13,7 @@ struct SlideOpts {
   int titles;         // 1 = show the title strip for a few seconds
   int shuffle;        // 1 = random order
   int loop;           // 1 = start again after the last picture
+  void ( *poll )( void );   // called while a picture shows (the jukebox: next song), or 0
 };
 
 // Fills out (80 chars) with the path of picture i; returns 0 if there is none

@@ -41,3 +41,13 @@ vm/files/DMTEST/PICSCGA/
 
 # Workflow exports dropped here; the copies MindServer uses are in helper/workflows/
 /krea2SimpleFine_fixed*.json
+
+# Music: Python runtime, the upstream MIDI-GPT clone (its own git repo, venv, model weights,
+# proof-of-concept scripts and outputs) and the Windows MIDI player stay local.
+# Our own code is in Labtext2midi/worker/ (tracked).
+Labtext2midi/.python/
+Labtext2midi/MIDI-GPT/
+Labtext2midi/MidiPlayer6/
+Labtext2midi/*.txt
+Labtext2midi/worker/*.wav
+Labtext2midi/worker/__pycache__/

@@ -21,11 +21,13 @@
 #include "cfg.h"
 #include "tpi.h"
 #include "net.h"
+#include "music.h"
+#include "jukebox.h"
 
 // ---------------------------------------------------------------- data
 
-enum { MK_USER, MK_AI, MK_PIC, MK_ERR };
-enum { DL_TEXT, DL_PIC, DL_BLANK };
+enum { MK_USER, MK_AI, MK_PIC, MK_ERR, MK_MUSIC };     // MK_MUSIC: a song card (pic = song id, text = title)
+enum { DL_TEXT, DL_PIC, DL_BLANK, DL_SONG };
 
 struct Msg {
   unsigned char kind;
@@ -183,6 +185,7 @@ static void layout_from( int mi ) {
     if ( m.kind == MK_PIC ) {
       for ( int k = 0; k < 5; k++ ) add_line( m.off, m.len, DL_PIC, k, i );
     }
+    else if ( m.kind == MK_MUSIC ) add_line( m.off, m.len, DL_SONG, 0, i );
     else {
       layout_text( i, m.off, m.len );
       if ( m.kind == MK_USER && m.pic[0] ) {
@@ -226,6 +229,17 @@ static void draw_row( int r ) {
     unsigned char fg = m.kind == MK_USER ? BLUE : m.kind == MK_ERR ? RED : BLACK;
     for ( int k = 0; k < d.len && c < COLS; k++, c++ )
       vid_char( TEXT_X + c * 8, y + 1, (unsigned char)s_tx[ d.off + k ], fg, WHITE );
+    for ( ; c < COLS; c++ ) vid_char( TEXT_X + c * 8, y + 1, ' ', BLACK, WHITE );
+  }
+  else if ( d.type == DL_SONG ) {
+    // A song card: note, title, and what a click does
+    vid_char( TEXT_X + c * 8, y + 1, 14, MAGENTA, WHITE ); c++;
+    vid_char( TEXT_X + c * 8, y + 1, ' ', BLACK, WHITE ); c++;
+    unsigned n = m.len < 40 ? m.len : 40;
+    for ( unsigned k = 0; k < n && c < COLS; k++, c++ ) vid_char( TEXT_X + c * 8, y + 1, (unsigned char)s_tx[ m.off + k ], BLACK, WHITE );
+    const char *hint = !music_available( ) ? "  (needs the Tandy sound chip)" :
+                       music_have( m.pic ) ? "  (click: play / stop)" : "  (click to download)";
+    for ( int k = 0; hint[k] && c < COLS; k++, c++ ) vid_char( TEXT_X + c * 8, y + 1, (unsigned char)hint[k], DGRAY, WHITE );
     for ( ; c < COLS; c++ ) vid_char( TEXT_X + c * 8, y + 1, ' ', BLACK, WHITE );
   }
   else if ( d.type == DL_PIC ) {
@@ -359,10 +373,10 @@ static void save_chat_disk( void ) {
   for ( int i = s_saved; i < s_nmsgs; i++ ) {
     Msg &m = s_msgs[i];
     if ( m.kind == MK_ERR ) continue;
-    if ( m.kind == MK_PIC ) {
+    if ( m.kind == MK_PIC || m.kind == MK_MUSIC ) {
       unsigned n = m.len < 60 ? m.len : 60;
       _fmemcpy( line, s_tx + m.off, n ); line[n] = 0;
-      fprintf( f, "!I %s %s\r\n", m.pic, line );
+      fprintf( f, "%s %s %s\r\n", m.kind == MK_PIC ? "!I" : "!M", m.pic, line );
       continue;
     }
     fputs( m.kind == MK_USER ? ">U\r\n" : ">A\r\n", f );
@@ -408,7 +422,7 @@ struct Cost { long bytes, lines; int msgs; };
 
 static int is_msg_start( const char *l ) {
   return ( l[0] == '>' && ( l[1] == 'U' || l[1] == 'A' ) && ( !l[2] || l[2] == '\r' || l[2] == '\n' ) ) ||
-         !strncmp( l, "!I ", 3 );
+         !strncmp( l, "!I ", 3 ) || !strncmp( l, "!M ", 3 );
 }
 
 // Line reader over fread chunks.  Watcom's fgets costs about 1000 cycles per character on an
@@ -520,11 +534,11 @@ static void parse_from( FILE *f, long at ) {
       continue;
     }
     if ( !strncmp( line, "!P ", 3 ) && cur >= 0 ) { str_copy( s_msgs[cur].pic, line + 3, 9 ); continue; }
-    if ( !strncmp( line, "!I ", 3 ) ) {
+    if ( !strncmp( line, "!I ", 3 ) || !strncmp( line, "!M ", 3 ) ) {
       char pid[9];
       str_copy( pid, line + 3, 9 );
       const char *t = strlen( line ) > 12 ? line + 12 : "";
-      add_msg( MK_PIC, t, pid );
+      add_msg( line[1] == 'I' ? MK_PIC : MK_MUSIC, t, pid );
       cur = -1;
       continue;
     }
@@ -786,6 +800,7 @@ static void send_message( void ) {
   sprintf( path, "/chat?id=%s", s_chatId );
   if ( s_attach[0] ) sprintf( path + strlen( path ), "&img=%s", s_attach );
   if ( cfg.draw_enhance >= 0 ) sprintf( path + strlen( path ), "&draw_enhance=%d", cfg.draw_enhance ? 1 : 0 );
+  if ( music_available( ) ) strcat( path, "&music=1" );    // Qwen may then compose songs (M lines)
   if ( cfg_cga ) strcat( path, "&mode=cga" );              // CGA prompts, pictures drawn for CGA
   static char body[ 400 ];
   str_copy( body, s_input, sizeof( body ) );
@@ -798,6 +813,8 @@ static void send_message( void ) {
   int rc = http_open( cfg.server, cfg.port, "POST", path, body, (unsigned)strlen( body ), "text/plain" );
   int aiMsg = -1, done = 0, replied = 0, cancelled = 0;
   static char pending[4][9];
+  static char songs[2][9], songTitle[2][40];
+  int nsongs = 0;
   int npending = 0;
   static char line[ 1100 ];
   // No pointer while the reply streams in (it can't be used then anyway), so no drawing
@@ -836,6 +853,7 @@ static void send_message( void ) {
         sprintf( t, "Drawing the picture... %s%%  (Esc = stop)", arg + 8 );
         state = t;
       }
+      else if ( !strncmp( arg, "composing", 9 ) ) state = "Composing the song on the PC...  (Esc = stop)";
       else state = "Qwen is thinking...  (Esc = stop)";
       app_spin( state );
     }
@@ -862,6 +880,18 @@ static void send_message( void ) {
       int pm = add_msg( MK_PIC, title, pid );
       layout_from( pm );
       refresh_from( s_msgs[pm].firstLine, wasBottom );
+      aiMsg = -1;
+    }
+    else if ( code == 'M' ) {
+      // A song: like a picture, it is downloaded after the reply's connection closes
+      char sid[9];
+      str_copy( sid, arg, sizeof( sid ) );
+      const char *title = strlen( arg ) > 9 ? arg + 9 : "";
+      if ( nsongs < 2 ) { str_copy( songs[ nsongs ], sid, 9 ); str_copy( songTitle[ nsongs ], title, 40 ); nsongs++; }
+      int wasBottom = ( s_top == max_top( ) );
+      int sm = add_msg( MK_MUSIC, title, sid );
+      layout_from( sm );
+      refresh_from( s_msgs[sm].firstLine, wasBottom );
       aiMsg = -1;
     }
     else if ( code == 'E' ) {
@@ -893,6 +923,25 @@ static void send_message( void ) {
     }
   }
   if ( got ) gallery_rescan( );      // the Gallery lists PICS only when told to, as after Create
+  // Then the songs; the first one starts playing (a song made on request is meant to be heard)
+  int gotSong = 0;
+  for ( int k = 0; k < nsongs; k++ ) {
+    if ( music_have( songs[k] ) ) continue;
+    app_status( "Downloading the song..." );
+    if ( music_download( songs[k], songTitle[k], 0 ) == 0 ) gotSong++;
+    else {
+      static char t[160];
+      sprintf( t, "Could not download the song: %s.  Click it to try again.", net_error( ) );
+      add_msg( MK_ERR, t, 0 );
+      snd_play( SND_ERROR );
+    }
+  }
+  if ( gotSong ) {
+    music_rescan( );
+    int i = jb_find( songs[0] );
+    if ( i >= 0 && jb_play( i, JB_ONCE ) == MUS_OK ) app_menu_status( );
+  }
+  if ( nsongs ) draw_panel( );
   if ( npending ) {
     draw_panel( );
     snd_play( SND_IMAGE );
@@ -945,6 +994,12 @@ void chat_attach( const char *id ) {
 }
 
 void chat_new( void ) { clear_chat( ); chat_draw( ); }
+
+void chat_prefill( const char *text ) {
+  str_copy( s_input, text, sizeof( s_input ) );
+  s_ws[0].cur = (unsigned)strlen( s_input );
+  s_ws[0].top = 0;
+}
 void chat_open( void ) { chats_dialog( ); }
 
 void chat_pick_attach( void ) {
@@ -953,6 +1008,33 @@ void chat_pick_attach( void ) {
     chat_attach( id );
     chat_draw( );
   }
+}
+
+// A click on a song card: play it (downloading it first if needed), or stop it if it plays
+static void play_song( Msg &m ) {
+  if ( !music_available( ) ) { msg_box( "Song", "Songs play on the Tandy sound chip, which this PC does not have.", "OK" ); return; }
+  int i = jb_find( m.pic );
+  if ( i >= 0 && jb_current( ) == i ) { jb_stop( ); app_menu_status( ); app_status( "Music stopped." ); return; }
+  if ( !music_have( m.pic ) ) {
+    if ( !app_net ) { msg_box( "Song", "This song is not on this Tandy yet. Start the network to download it.", "OK" ); return; }
+    char title[40];
+    unsigned n = m.len < 39 ? m.len : 39;
+    _fmemcpy( title, s_tx + m.off, n ); title[n] = 0;
+    app_status( "Downloading the song..." );
+    if ( music_download( m.pic, title, 0 ) ) {
+      char t[160];
+      sprintf( t, "Could not download this song: %s", net_error( ) );
+      msg_box( "Song", t, "OK" );
+      return;
+    }
+    music_rescan( );
+    draw_panel( );
+    i = jb_find( m.pic );
+  }
+  int rc = jb_play( i, JB_ONCE );
+  app_menu_status( );
+  if ( rc ) app_status( "Cannot play: %s.", music_error( rc ) );
+  else app_status( "Playing %s.  F8 stops it.", jb_now( ) );
 }
 
 int chat_event( Event *e ) {
@@ -970,6 +1052,10 @@ int chat_event( Event *e ) {
       return CMD_NONE;
     }
     int r = ( e->y - PY - 2 ) / ROW_H, i = s_top + r;
+    if ( i >= 0 && i < s_ndl && s_dl[i].type == DL_SONG ) {
+      play_song( s_msgs[ s_dl[i].msg ] );
+      return CMD_NONE;
+    }
     if ( i >= 0 && i < s_ndl && s_dl[i].type == DL_PIC ) {
       Msg &m = s_msgs[ s_dl[i].msg ];
       if ( m.pic[0] ) {

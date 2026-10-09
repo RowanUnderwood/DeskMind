@@ -17,9 +17,9 @@ struct ServerState {
 extern ServerState app_server;
 
 // Screens
-enum { SCR_CHAT, SCR_CREATE, SCR_GALLERY };
+enum { SCR_CHAT, SCR_CREATE, SCR_GALLERY, SCR_MUSIC };
 // Commands a screen can return to the main loop
-enum { CMD_NONE = 0, CMD_GOTO_CHAT = 1, CMD_GOTO_CREATE, CMD_GOTO_GALLERY, CMD_QUIT };
+enum { CMD_NONE = 0, CMD_GOTO_CHAT = 1, CMD_GOTO_CREATE, CMD_GOTO_GALLERY, CMD_QUIT, CMD_GOTO_MUSIC };
 
 // Work area used by the screens (inside menu bar and status bar)
 #define SCR_X  0

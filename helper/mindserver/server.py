@@ -6,6 +6,7 @@ Streamed replies are coded lines:
 
     T <text>       append text          P            paragraph break
     I <id> <title> image ready          S <status>   status / progress
+    M <id> <title> song ready
     E <message>    error                D            done
 """
 
@@ -29,6 +30,7 @@ from .config import HELPER_DIR, PROJECT_DIR, Config
 from .qwen import QwenError
 from .store import make_title
 from .jobs import JobQueue
+from .music import MusicService
 from .services import Services
 from .store import Store
 
@@ -124,6 +126,7 @@ def h_ping(h: Handler):
         f"OK MindServer {VERSION}\n"
         f"qwen {st['qwen']}\n"
         f"comfy {st['comfy']}\n"
+        f"music {st.get('music', 'unknown')}\n"
         f"you {h.client_address[0]}\n"
     )
 
@@ -203,7 +206,7 @@ def h_chat(h: Handler):
     mode = _mode(h) if q.get("mode") else None
     h.start_stream()
     h.app.chat.reply(q.get("id"), text, (q.get("img") or "").upper() or None, h.stream_line,
-                     None if de is None else de == "1", mode)
+                     None if de is None else de == "1", mode, q.get("music") == "1")
 
 
 def h_chats(h: Handler):
@@ -356,6 +359,94 @@ def h_list(h: Handler):
     h.send_text("\n".join(lines) + ("\n" if lines else ""))
 
 
+# ---------------------------------------------------------------- music
+
+def h_music_gen(h: Handler):
+    """POST /music/gen  body = a description, or a JSON spec ({"style": ...}).  Answers 'J <job>'."""
+    text = _text_body(h)
+    if not text:
+        h.send_text("E Empty request\n", 400)
+        return
+    spec = None
+    if text.lstrip().startswith("{"):
+        import json
+        try:
+            spec = json.loads(text)
+        except ValueError:
+            h.send_text("E Bad JSON\n", 400)
+            return
+    job = h.app.music.submit(text if spec is None else "", spec)
+    h.send_text(f"J {job.id}\n")
+
+
+def h_music_job(h: Handler, job_id: str):
+    """GET /music/job/<n>[?wait=1]: 'S running composing' ... then 'M <id> <title>' or 'E <msg>' (and 'D' when waiting)."""
+    job = h.app.music.get(int(job_id))
+    if job is None:
+        h.send_text("E No such job\n", 404)
+        return
+    if h._query().get("wait") != "1":
+        h.send_text(job.line() + "\n")
+        return
+    h.start_stream()
+    line = job.line()
+    h.stream_line(line)
+    deadline = time.time() + 10 * 60
+    while job.status not in ("done", "error") and time.time() < deadline:
+        new = h.app.music.wait_change(job, line, timeout=5.0)
+        if new != line:
+            line = new
+            h.stream_line(line)
+    if job.status not in ("done", "error"):
+        h.stream_line("E Timed out")
+    h.stream_line("D")
+
+
+def h_music_list(h: Handler):
+    """GET /music/list: '<id> <yyyymmddhhmm> <seconds> <title>' per song, newest first."""
+    lines = []
+    for m in h.app.music.store.list():
+        stamp = m.get("created", "")[:16].replace("-", "").replace("T", "").replace(":", "") or "000000000000"
+        secs = round(m.get("report", {}).get("seconds", 0))
+        lines.append(f"{m['id']} {stamp} {secs} {TX.to_cp437(m.get('title', ''))}")
+    h.send_text("\n".join(lines) + ("\n" if lines else ""))
+
+
+def _music_id(h: Handler, id_: str) -> str | None:
+    id_ = id_.upper()
+    if not h.app.music.store.exists(id_):
+        h.send_text(f"E No song {id_}\n", 404)
+        return None
+    return id_
+
+
+def h_music_get(h: Handler, id_: str):
+    """GET /music/<id>: the T3P1 stream the Tandy plays."""
+    id_ = _music_id(h, id_)
+    if id_:
+        h.send_bytes(h.app.music.store.t3(id_))
+
+
+def h_music_wav(h: Handler, id_: str):
+    """GET /music/<id>/wav: the preview, for listening on a PC."""
+    id_ = _music_id(h, id_)
+    if id_:
+        with open(h.app.music.store.path(id_, "wav"), "rb") as f:
+            h.send_bytes(f.read(), "audio/wav")
+
+
+def h_music_title(h: Handler, id_: str):
+    id_ = _music_id(h, id_)
+    if id_:
+        h.app.music.store.set_title(id_, _text_body(h))
+        h.send_text("OK\n")
+
+
+def h_music_del(h: Handler, id_: str):
+    h.app.music.store.delete(id_)
+    h.send_text("OK\n")
+
+
 def h_files(h: Handler, name: str):
     """GET /files/<NAME.EXT>: the latest DOS build from dos\\out (for UPDATE.BAT)."""
     folder = os.path.join(PROJECT_DIR, "dos", "out")
@@ -378,6 +469,8 @@ ROUTES = {
     ("POST", "/chat"): h_chat,
     ("GET", "/chats"): h_chats,
     ("POST", "/enhance"): h_enhance,
+    ("POST", "/music/gen"): h_music_gen,
+    ("GET", "/music/list"): h_music_list,
 }
 
 _ID = r"([0-9A-Fa-f]{8})"
@@ -392,6 +485,11 @@ PATTERN_ROUTES = [
     ("GET", re.compile(rf"/chat/{_ID}"), h_chat_get),
     ("POST", re.compile(rf"/chat/{_ID}/del"), h_chat_del),
     ("POST", re.compile(rf"/chat/{_ID}/sync"), h_chat_sync),
+    ("GET", re.compile(r"/music/job/(\d+)"), h_music_job),
+    ("GET", re.compile(rf"/music/{_ID}"), h_music_get),
+    ("GET", re.compile(rf"/music/{_ID}/wav"), h_music_wav),
+    ("POST", re.compile(rf"/music/{_ID}/title"), h_music_title),
+    ("POST", re.compile(rf"/music/{_ID}/del"), h_music_del),
     ("GET", re.compile(r"/prompt/(\w+)"), h_prompt_get),
     ("POST", re.compile(r"/prompt/(\w+)"), h_prompt_set),
 ]
@@ -409,6 +507,8 @@ class MindServer:
         self.jobs = JobQueue(config, self.store)
         self.services = Services(config)
         self.chat = ChatEngine(config, self.store, self.jobs)
+        self.music = MusicService(config, self.chat.qwen)
+        self.chat.music = self.music
 
     def status(self) -> dict:
         return dict(self.services.status)

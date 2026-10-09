@@ -225,6 +225,49 @@ def test_transcript():
     print("transcript ok")
 
 
+def test_music_splitter():
+    from mindserver.text import DrawSplitter
+    sp = DrawSplitter()
+    vis = "".join(sp.feed(x) for x in ["Here is a tune! <mu", "sic>a fast cracktro", " tune</mus", "ic> and <draw>a cat</draw>."])
+    vis += sp.finish()
+    assert sp.music == ["a fast cracktro tune"] and sp.prompts == ["a cat"], (sp.music, sp.prompts)
+    assert vis == "Here is a tune!  and .", repr(vis)
+    print("music splitter ok")
+
+
+def test_music_transcript():
+    from mindserver.chat import ChatStore
+    chat = {"id": "0A0B0C0D", "title": "t", "created": "2026-10-09T10:00:00", "updated": "2026-10-09T10:00:00",
+            "messages": [{"role": "user", "text": "Make a song"},
+                         {"role": "assistant", "text": "Coming up.", "music": [{"id": "12345678", "title": "Raster Rush"}],
+                          "drawn": [{"id": "AABBCCDD", "title": "A cat"}]}]}
+    back = ChatStore.from_transcript("0A0B0C0D", ChatStore.to_transcript(chat))
+    assert back["messages"][1]["music"] == [{"id": "12345678", "title": "Raster Rush"}]
+    assert back["messages"][1]["drawn"] == [{"id": "AABBCCDD", "title": "A cat"}]
+    print("music transcript ok")
+
+
+def test_music_spec_and_store():
+    from mindserver.music import MusicStore, clean_spec, guess_style
+    s = clean_spec({"style": "Dungeon", "key": "d minor", "tempo": "500", "energy": "LOW", "drums": "lots",
+                    "length": "long", "title": "The \"Crypt\"", "extra": "dropped", "seed": "7"})
+    assert s["style"] == "dungeon" and s["key"] == "D" and s["tempo"] == 180 and s["energy"] == "low"
+    assert "drums" not in s and s["length"] == "long" and "extra" not in s and s["seed"] == 7, s
+    assert clean_spec({"key": "Bb"})["key"] == "Bb" and clean_spec({"key": "f#"})["key"] == "F#"
+    assert clean_spec({}, "a spooky cave theme")["style"] == "dungeon"
+    assert guess_style("a happy village song") == "adventure" and guess_style("make it fast") == "cracktro"
+    with tempfile.TemporaryDirectory() as d:
+        st = MusicStore(d)
+        a = st.add(b"T3P1aaaa", b"MThd", b"RIFF", {"title": "One", "report": {"seconds": 61.4}})
+        b = st.add(b"T3P1bbbb", b"MThd", b"RIFF", {"title": "Two"})
+        assert st.exists(a) and st.t3(a) == b"T3P1aaaa" and len(st.list()) == 2
+        st.set_title(a, "Renamed song")
+        assert st.meta(a)["title"] == "Renamed song"
+        st.delete(b)
+        assert not st.exists(b) and [m["id"] for m in st.list()] == [a]
+    print("music spec and store ok")
+
+
 def test_workflows():
     from mindserver.comfy import ComfyClient, list_workflows
     ok, bad = list_workflows()
@@ -285,6 +328,9 @@ if __name__ == "__main__":
     test_old_draw_note()
     test_history()
     test_transcript()
+    test_music_splitter()
+    test_music_transcript()
+    test_music_spec_and_store()
     test_workflows()
     test_profiles()
     print("ALL OK")

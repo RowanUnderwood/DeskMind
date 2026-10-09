@@ -1,4 +1,4 @@
-"""Health checks and start/stop for NInfer (Qwen) and ComfyUI.
+"""Health checks and start/stop for NInfer (Qwen), ComfyUI and the music worker (MIDI-GPT).
 
     python -m mindserver.services model   prints the configured NInfer model (for START-MINDSERVER.bat)
     python -m mindserver.services check   prints a warning if the running NInfer holds the other model
@@ -79,15 +79,17 @@ class Services:
 
     def __init__(self, config: Config, on_change=None, interval: float = 3.0):
         self.config = config
-        self.status = {"qwen": "unknown", "comfy": "unknown"}
+        self.status = {"qwen": "unknown", "comfy": "unknown", "music": "unknown"}
         self.on_change = on_change
         self.interval = interval
         threading.Thread(target=self._loop, name="services", daemon=True).start()
 
     def _loop(self) -> None:
         while True:
+            from .music import check_worker
             new = {"qwen": check_qwen(self.config["qwen"]["url"]),
-                   "comfy": check_comfy(self.config["comfy"]["url"])}
+                   "comfy": check_comfy(self.config["comfy"]["url"]),
+                   "music": check_worker(self.config["music"]["url"])}
             if new != self.status:
                 if new["qwen"] == "up" and self.status["qwen"] != "up":
                     model, ctx = ninfer_running(self.config)
@@ -101,6 +103,10 @@ class Services:
             time.sleep(self.interval)
 
     def start(self, name: str) -> None:
+        if name == "music":
+            subprocess.Popen(["cmd", "/c", "start", "Music worker (3090)", "cmd", "/c", "call",
+                              self.config["music"]["worker_bat"]], creationflags=NEW_CONSOLE)
+            return
         s = self.config["services"]
         bat = s["ninfer_bat"] if name == "qwen" else s["comfy_bat"]
         title = "NInfer (5090)" if name == "qwen" else "ComfyUI (4090)"
@@ -114,6 +120,8 @@ class Services:
         if name == "qwen":
             subprocess.Popen(["cmd", "/c", "call", self.config["services"]["ninfer_stop_bat"]],
                              creationflags=NEW_CONSOLE)
+        elif name == "music":
+            kill_port(_port(self.config["music"]["url"]))
         else:
             kill_port(_port(self.config["comfy"]["url"]))
 

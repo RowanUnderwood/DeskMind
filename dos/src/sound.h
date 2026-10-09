@@ -22,6 +22,7 @@ void snd_stop( void );
 int  snd_busy( void );
 void snd_poll( void );       // call often: safety nets (logged), see sound.cpp
 void snd_settle( void );     // wait until the current sound has ended; call before disk work
+void snd_music( int on );    // music.cpp's owner hook: 1 = a song owns the chip (effects are muted)
 
 // Diagnostics for the stuck-note hunt: an event ring, dumped by snd_diag()
 enum { SL_PLAY = 1, SL_END, SL_STOP, SL_WATCHDOG, SL_NET, SL_STALL, SL_USER, SL_DISK_BEGIN, SL_DISK_END, SL_SETTLE };

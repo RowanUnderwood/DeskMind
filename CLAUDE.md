@@ -48,6 +48,8 @@ rows in the parent's `games.csv` (source `OWN`, recipe field `home="DESKMIND"`).
 | `tools\ow2\` | Open Watcom v2 snapshot 2026-09-01 (extracted tarball, not installed) |
 | `tools\mtcp\` | mTCP source 2025-01-10 (GPLv3). **Read-only**: the DOS build compiles it in place, objects go to `dos\obj\` |
 | `tools\dl\` | Downloaded archives |
+| `Labtext2midi\` | Music: `worker\` (tracked: MIDI-GPT worker, recipes, T3 compiler), `MIDI-GPT\` (upstream clone + venv + model, git-ignored), `AGENTS.md`, `DESKMIND-MUSIC-DESIGN.md` |
+| `dos\res\` | Files installed next to DESKMIND.EXE: `MODEM.T3` (made by `tools\make_modem.py`), `MUSIC\RASTER.T3` + `SONGS.LST` |
 
 ## Building
 
@@ -161,6 +163,44 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   the newest-first lists; the Gallery starts at the selected picture and goes on to newer ones). Counter "n/total" = the
   n-th oldest (`count - order[pos]`), also in random order. `SLIDES /LIST` says "oldest first" (checked in DOSBox).
   On the card 2026-10-09 (backups `..._before/after-deskmind-084.img`); user confirmed the new order on the real TL/3 (2026-10-09).
+- **Music (0.9.0, 2026-10-09; plan `~\.claude\plans\pasted-content-id-7690-come-up-goofy-origami.md`).** Songs are T3P1
+  register streams (`Labtext2midi\worker\t3.py` documents the format; the RASTER.COM player's, confirmed on the TL/3).
+  - DOS `music.cpp` (`-zu`, 0 `ss:` refs): the song sits in one exact DOS block (`MUSIC_MAX` 32,000), the PIT runs at the
+    stream's divisor (9943 = 120 Hz) **only while a song plays**, and the IRQ0 handler writes due records to C0h, then chains
+    to the old INT 08 every 65,536 PIT clocks (else EOI itself): BIOS ticks, mTCP and INT 1Ch keep 18.2 Hz. Vector written
+    straight into the IVT with interrupts off; INT 23h ignored while playing; `atexit(music_done)`. Not in EMS on purpose:
+    the slideshow maps the whole page frame and an ISR can't remap safely.
+  - **Sound ownership:** `music_owner_hook = snd_music` (DeskMind only): while a song plays, sound.cpp's tick handler
+    chains without touching the chip (its `refresh()` would mute voice 2 and noise every tick) and `snd_play` is a no-op.
+  - `jukebox.cpp` (DeskMind + SLIDES): library = `<cfg.music>\*.T3` + `SONGS.LST` (`FILE YYYYMMDDHHMM SECS TITLE`).
+    **12-digit dates overflow 32 bits** (first build showed "0007-4"): in memory they are packed like picture dates
+    (`JB_WHEN`). Modes once/loop/random/jingle; `jb_poll` (from `gui_idle` and `SlideOpts.poll`) starts the next random song.
+    The main loop redraws (menu-bar note, Music panel) only when idle, never inside dialogs.
+  - Music screen `scr_music.cpp` (F7, F8 stops, Music menu), Settings "Music: off / random songs / last song played"
+    (`slide_music`, `slide_song` = the last song played), SLIDES `/M R|OFF|song`, About says where a slideshow goes.
+  - Start-up: `MODEM.T3` (6.5 s, `tools\make_modem.py`, preview `helper\out\modem-preview.wav`) when `app_net &&
+    app_server.ok`, as a jingle any key/click stops; else `SND_STARTUP`. `cfg.sound` 0 mutes both.
+  - Chat: DeskMind sends `music=1` (only with the Tandy chip); then MindServer appends `prompts\music_chat.txt` to the one
+    system message, `<music>description</music>` (DrawSplitter pair 2) becomes a job, and the stream carries `S composing`
+    and `M <id> <title>`. DeskMind adds an `MK_MUSIC` card (one `DL_SONG` row), downloads after the reply (one socket) via
+    `music_download` (to `.TMP`, `music_probe`, rename), plays the first song. `.TCH`/transcripts have `!M <id> <title>`.
+    Old clients (no `music=1`) get neither the prompt nor M lines.
+  - MindServer `music.py`: `MusicStore` (`data\music\<ID>.t3/.mid/.wav/.json`), `MusicService` (own thread; Qwen turns a
+    description into a spec with `prompts\music_spec.txt`, `clean_spec` keeps known values, keyword guess without Qwen),
+    endpoints `/music/gen`, `/music/job/<n>[?wait=1]`, `/music/list`, `/music/<id>[/wav|/title|/del]`; Services tab row
+    and a Music tab; START/STOP-MINDSERVER handle the worker (port 8287).
+  - Worker `Labtext2midi\worker\music_worker.py` (MIDI-GPT venv, 3090 by UUID, model load 0.9 s, songs in 3-6 s):
+    `recipes.py` (cracktro = Raster Rush's recipe, adventure, dungeon), `compose.py` (MIDI-GPT regenerates lead + bass over
+    a scaffold, A twice keeping the more varied lead, sparse-lead retry; form/cadence in code), `compile.py` (export-tandy +
+    drums from the bar map; **with drums off it reproduces the TL/3-confirmed RASTER.T3 byte for byte**, `test_compile.py`),
+    `compile_fit` thins drums then drops sections to stay under 30,000 bytes. `try_recipes.py` reports changed bars.
+  - Tests: `MUSTEST.EXE` (dos\spike; write log vs file schedule, BIOS clock, vectors, bad files) PASS in DOSBox Tandy/286
+    for both Raster streams and MODEM.T3; 86Box SL/2: Music screen, play/stop, slideshow music, and the whole chat path
+    against `helper\tests\music_fake_qwen.py` (canned Qwen, real worker): card, download, auto-play. `tests.music_live`
+    (endpoints), `tests.test_core` (splitter, transcript, spec, store), CHATTEST (`!M` round trip, appends only).
+    `vid_text` once failed to draw a fourth panel line in the Music screen for no reason found; `ui_text_fit` works.
+  - The venv's `pyvenv.cfg` pointed at the old `H:\Labtext2midi\.python` after the folder move: fixed (backup `.bak-20261009`).
+  - **Card installs must not overwrite `C:\DESKMIND\MUSIC\SONGS.LST`** once the Tandy has its own songs (it holds their titles).
 - **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
   AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
   mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports

@@ -48,6 +48,11 @@ DEFAULTS = {
         "ninfer_model": "thinkingcap",    # thinkingcap | full | "" = launch-ninfer.bat's own WIN_MODEL
         "comfy_bat": os.path.join(PROJECT_DIR, "run_comfy_image.bat"),
     },
+    "music": {
+        "url": "http://127.0.0.1:8287",     # the MIDI-GPT worker (RTX 3090)
+        "worker_bat": os.path.join(PROJECT_DIR, "Labtext2midi", "launch-music-worker.bat"),
+        "effort_spec": "low",               # Qwen effort for turning a description into a song spec
+    },
     "dither": DitherSettings(engine="pillow", method="floyd-steinberg").to_dict(),
 }
 

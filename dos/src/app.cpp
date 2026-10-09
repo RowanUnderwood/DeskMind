@@ -16,6 +16,8 @@
 #include "tpi.h"
 #include "net.h"
 #include "slide.h"
+#include "music.h"
+#include "jukebox.h"
 #include "scr.h"
 
 char app_dir[80] = "";
@@ -194,6 +196,10 @@ void app_menu_status( void ) {
   if ( !app_net ) strcpy( right, "offline" );
   else if ( !app_server.ok ) strcpy( right, "MindServer ?" );
   else sprintf( right, "Qwen %s  Draw %s", app_server.qwen ? "ok" : "--", app_server.comfy ? "ok" : "--" );
+  if ( jb_mode( ) != JB_IDLE && jb_mode( ) != JB_JINGLE ) {      // a note while a song plays (F8 stops it)
+    memmove( right + 3, right, strlen( right ) + 1 );
+    right[0] = 14; right[1] = ' '; right[2] = ' ';
+  }
   extern const Menu *main_menus( int *n );
   int n;
   const Menu *m = main_menus( &n );
@@ -244,8 +250,13 @@ void app_settings( void ) {
   ws[n].type = W_BUTTON; ws[n].id = 3; ws[n].x = 228; ws[n].y = 106; ws[n].w = 200; ws[n].h = 14;
   ws[n].text = fxLabel; n++;
   int shw = n;
-  ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 124; ws[n].w = 420; ws[n].h = 10;
+  ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 124; ws[n].w = 212; ws[n].h = 10;
   ws[n].text = "Slideshow: random order"; ws[n].checked = cfg.slide_shuffle; n++;
+  static const char *const musNames[] = { "Music: off", "Music: random songs", "Music: last song played" };
+  int smusic = cfg.slide_music;
+  int musw = n;
+  ws[n].type = W_BUTTON; ws[n].id = 4; ws[n].x = 228; ws[n].y = 122; ws[n].w = 200; ws[n].h = 14;
+  ws[n].text = musNames[ smusic ]; n++;
   ws[n].type = W_BUTTON; ws[n].id = 1; ws[n].x = w - 200; ws[n].y = 140; ws[n].w = 80; ws[n].h = 14;
   ws[n].text = "Save"; ws[n].flags = WF_DEFAULT; n++;
   ws[n].type = W_BUTTON; ws[n].id = 2; ws[n].x = w - 108; ws[n].y = 140; ws[n].w = 80; ws[n].h = 14;
@@ -261,14 +272,22 @@ void app_settings( void ) {
   form_init( &f, "Settings", x, y, w, h, ws, n );
   form_draw( &f );
   int r;
-  while ( ( r = form_run( &f ) ) == 3 ) {           // the effect button cycles through the transitions
-    effect = ( effect + 1 ) % FX_COUNT;
-    sprintf( fxLabel, "Effect: %s", slide_effect_name( effect ) );
-    form_draw_widget( &f, fxw );
+  while ( ( r = form_run( &f ) ) == 3 || r == 4 ) {
+    if ( r == 3 ) {                                 // the effect button cycles through the transitions
+      effect = ( effect + 1 ) % FX_COUNT;
+      sprintf( fxLabel, "Effect: %s", slide_effect_name( effect ) );
+      form_draw_widget( &f, fxw );
+    }
+    else {                                          // slideshow music: off, random songs, the last song played
+      smusic = ( smusic + 1 ) % 3;
+      ws[musw].text = musNames[ smusic ];
+      form_draw_widget( &f, musw );
+    }
   }
   ui_restore( x, y, w + 6, h + 3, save );
   if ( r != 1 ) { cfg = old; return; }
   cfg.slide_effect = effect;
+  cfg.slide_music = smusic;
   cfg.slide_shuffle = ws[shw].checked;
   cfg.port = (unsigned)atoi( port ) ? (unsigned)atoi( port ) : 8286;
   cfg.slide_delay = atoi( delay ) > 0 ? atoi( delay ) : 8;
@@ -292,12 +311,11 @@ void app_about( void ) {
   r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
-  sprintf( t, "DeskMind 0.8.4 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen and draw with Krea 2 through "
-              "MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK, slideshow %s. "
-              "Built with Open Watcom and mTCP (GPLv3). "
-              "Limits: the Gallery shows the newest 500 pictures, Chats lists the newest 100. "
-              "A chat holds about 40,000 characters (300 messages); then Continue hides the "
-              "older part, which stays saved.",
+  sprintf( t, "DeskMind 0.9.0 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen, draw with Krea 2 and "
+              "compose with MIDI-GPT through MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK, "
+              "slideshow %s. Built with Open Watcom and mTCP (GPLv3). "
+              "Limits: the newest 500 pictures, 100 chats and 150 songs; a chat holds about 40,000 "
+              "characters (then Continue hides the older part, which stays saved).",
            cfg_cga ? " (CGA mode now)" : "", cfg.server, cfg.port, app_pc( ), ip, r.w.bx / 64, app_ems * 16, slide_mem_note( ) );
   msg_box( "About DeskMind", t, "OK" );
 }

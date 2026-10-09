@@ -24,6 +24,7 @@ void cfg_defaults( const char *exeDir ) {
   sprintf( cfg.pics, "%sPICS", exeDir );
   sprintf( cfg.pics_cga, "%sPICSCGA", exeDir );
   sprintf( cfg.chats, "%sCHATS", exeDir );
+  sprintf( cfg.music, "%sMUSIC", exeDir );
 }
 
 int cfg_cga = 0;
@@ -68,6 +69,9 @@ int cfg_load( const char *path ) {
     else if ( str_ieq( key, "pics" ) )         str_copy( cfg.pics, val, sizeof( cfg.pics ) );
     else if ( str_ieq( key, "pics_cga" ) )     str_copy( cfg.pics_cga, val, sizeof( cfg.pics_cga ) );
     else if ( str_ieq( key, "chats" ) )        str_copy( cfg.chats, val, sizeof( cfg.chats ) );
+    else if ( str_ieq( key, "music" ) )        str_copy( cfg.music, val, sizeof( cfg.music ) );
+    else if ( str_ieq( key, "slide_music" ) )  cfg.slide_music = n >= 0 && n <= 2 ? n : 0;
+    else if ( str_ieq( key, "slide_song" ) )   str_copy( cfg.slide_song, val, sizeof( cfg.slide_song ) );
   }
   fclose( f );
   return 0;
@@ -82,6 +86,7 @@ int cfg_save( const char *path ) {
            cfg.sound, cfg.mode, cfg.enhance, cfg.review, cfg.draw_enhance );
   fprintf( f, "slide_delay=%d\nslide_effect=%d\nslide_shuffle=%d\npics=%s\npics_cga=%s\nchats=%s\n",
            cfg.slide_delay, cfg.slide_effect, cfg.slide_shuffle, cfg.pics, cfg.pics_cga, cfg.chats );
+  fprintf( f, "music=%s\nslide_music=%d\nslide_song=%s\n", cfg.music, cfg.slide_music, cfg.slide_song );
   int bad = ferror( f );
   fclose( f );
   return bad;

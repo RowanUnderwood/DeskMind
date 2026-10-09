@@ -3,7 +3,8 @@
 # check it (fsck.fat -n, 7z t, listing diff), copy it back once, cmp, then a dated "after" backup.
 #
 # Usage: card_install.ps1 -Tag deskmind-tests [-Folder DMTEST] [-Files a.exe,b.raw] [-Also PLAY]
-#   -Files  src[=NAME] goes to C:\<Folder>\NAME; src=DIR/NAME goes to C:\DIR\NAME (DIR must be in -Also)
+#   -Files  src[=NAME] goes to C:\<Folder>\NAME; src=DIR/NAME goes to C:\DIR\NAME (DIR = Folder or in -Also;
+#           NAME may have subfolders, e.g. DESKMIND/MUSIC/RASTER.T3, which are created when missing)
 #   -Also   other root folders this install may change (e.g. PLAY for the launchers)
 param([Parameter(Mandatory)][string]$Tag, [string]$Folder = "DMTEST", [string[]]$Files = @(), [string[]]$Also = @())
 $ErrorActionPreference = "Stop"
@@ -38,8 +39,15 @@ foreach ($f in $Files) {
   if (-not $name) { $name = [IO.Path]::GetFileName($src).ToUpper() }
   $dest = "::/$Folder/$name"
   if ($name -match '/') {
-    if ($Also -notcontains ($name -split '/')[0]) { throw "$name is outside $Folder and not in -Also" }
+    $top = ($name -split '/')[0]
+    if ($top -ne $Folder -and $Also -notcontains $top) { throw "$name is outside $Folder and not in -Also" }
     $dest = "::/$name"
+  }
+  # A subfolder (e.g. DESKMIND/MUSIC/RASTER.T3): create it first if it is not there yet
+  $parent = $dest.Substring(0, $dest.LastIndexOf('/'))
+  if ($parent -ne "::/$Folder" -and $parent -ne "::") {
+    wsl -d Ubuntu-20.04 -- sh -c "export MTOOLS_SKIP_CHECK=1; mdir -i '$wimg' $parent >/dev/null 2>&1 || mmd -i '$wimg' $parent </dev/null"
+    if ($LASTEXITCODE) { throw "Could not create $parent in the work copy" }
   }
   wsl -d Ubuntu-20.04 -- sh -c "MTOOLS_SKIP_CHECK=1 mcopy -o -i '$wimg' '$(WslPath $src)' $dest </dev/null"
   if ($LASTEXITCODE) { throw "mcopy failed for $src" }

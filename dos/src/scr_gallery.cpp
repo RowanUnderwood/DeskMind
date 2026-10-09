@@ -17,6 +17,7 @@
 #include "tpi.h"
 #include "net.h"
 #include "slide.h"
+#include "jukebox.h"
 
 #define WIN_Y  SCR_Y
 #define WIN_H  ( SCR_H - 1 )
@@ -380,15 +381,20 @@ static int slide_path( void *, int i, char *out ) {
   return 1;
 }
 
+static void slide_poll( void ) { jb_poll( ); }      // random songs go on during the show
+
 void gallery_slideshow( void ) {
   if ( s_n == 0 ) { msg_box( "Slideshow", "There are no pictures yet.", "OK" ); return; }
   SlideOpts o;
   o.delay = cfg.slide_delay > 0 ? cfg.slide_delay : 8;
   o.effect = cfg.slide_effect;
   o.titles = 1; o.shuffle = cfg.slide_shuffle; o.loop = 1;
+  o.poll = slide_poll;
+  int music = jb_slides_begin( );            // Settings: slideshow music (unless a song already plays)
   gui_mouse_hide( );
   // Oldest first; a picture picked further down the list (or any, in random order) plays first
   int shown = slide_run( s_n, ( o.shuffle || s_sel > 0 ) ? s_sel : -1, slide_path, 0, &o );
+  jb_slides_end( music );
   app_gui_mode( );
   gui_mouse_show( );
   if ( !shown ) {

@@ -1,5 +1,33 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 9: DeskMind 0.9.0, music (songs, jukebox, slideshow music, modem start-up)
+
+**New:** songs for the Tandy's sound chip (3 voices + noise drums), played in the background from the timer
+interrupt at 120 Hz, a Music screen (F7), slideshow music, songs made in Chat, and a modem handshake at start-up
+when MindServer answers. Raster Rush (the drum version you checked with RASTER.COM) is the first song.
+Checked in 86Box and DOSBox only: every chip write on its tick, BIOS clock right, IRQ0 restored.  **Not heard yet.**
+
+1. **Normal boot**, `DESKMIND`: the **old chime** (offline). **F7** Music > Raster Rush > **Play**.
+   It should sound exactly like RASTER.COM did, take 1:17 (stopwatch), and the clock in the panel should count.
+   A note in the menu bar while it plays; **F8** stops it.
+2. While a song plays: open Chat, scroll, Gallery, view a picture, Settings, F6 slideshow (every effect).
+   **No stutter, no stuck or wrong notes, no hangs.** DeskMind's own blips are quiet during music and come back after.
+   **Loop** repeats it; **Random** goes on to the next song (with one song: Raster Rush again).
+3. Settings (F5): **Music: random songs**, Save, then F6: music starts with the slideshow and stops with it.
+   From DOS: `SLIDES /M RASTER` loops Raster Rush during the show, `SLIDES /M OFF` none.
+4. After about an hour with music on and off: `TIME` at the DOS prompt should match a clock (the BIOS clock keeps going).
+5. **W boot** with MindServer running on the PC (START-MINDSERVER starts the music worker on the 3090 too):
+   DeskMind greets you with the **56k modem handshake** (about 6 s; any key stops it).
+6. Chat: **"make a fast cracktro song for the space pictures"** (or "a slow spooky dungeon tune"). A song card (note +
+   title) arrives a few seconds after the reply and starts playing. Click it to stop / play again. **F7**: it is in the list.
+   **Sync** in the Music screen fetches songs made in MindServer's Music tab.
+7. Help > About while a song plays (W boot), and again during a slideshow with music: the free memory.
+8. Optional: `CD \DMTEST`, `MUSTEST C:\DESKMIND\MUSIC\RASTER.T3` (about 80 s): all lines should say PASS, especially
+   "every one on its tick" and "BIOS ticks during playback". `MUSTEST MODEM.T3` for the short one.
+
+Report: does it sound like RASTER.COM, tempo right, any glitch during disk/network/slideshow, the modem sound, the
+chat song, the memory numbers, MUSTEST's lines.
+
 ## Round 8.3: DeskMind 0.8.3, stuck sounds: the real cause
 
 **Found (in 86Box):** the timer code that plays sounds read its settings through the wrong segment whenever the tick

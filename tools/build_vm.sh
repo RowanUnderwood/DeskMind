@@ -9,6 +9,10 @@ mcopy -o -i "$I@@32256" vm/files/CONFIG.SYS ::/CONFIG.SYS
 mcopy -o -i "$I@@32256" vm/files/AUTOEXEC.BAT ::/AUTOEXEC.BAT
 mmd -i "$I@@32256" ::/DMTEST 2>/dev/null || true
 for f in vm/files/DMTEST/* dos/out/*.EXE; do [ -f "$f" ] && mcopy -o -i "$I@@32256" "$f" ::/DMTEST/; done
+# Startup sound and the bundled songs (dos/res)
+mcopy -o -i "$I@@32256" dos/res/MODEM.T3 ::/DMTEST/ </dev/null
+mmd -i "$I@@32256" ::/DMTEST/MUSIC 2>/dev/null </dev/null || true
+for f in dos/res/MUSIC/*; do mcopy -o -i "$I@@32256" "$f" ::/DMTEST/MUSIC/ </dev/null; done
 for d in PICS PICSCGA CHATS; do if [ -d vm/files/DMTEST/$d ]; then
   mmd -i "$I@@32256" ::/DMTEST/$d 2>/dev/null </dev/null || true
   for f in vm/files/DMTEST/$d/*; do mcopy -o -i "$I@@32256" "$f" ::/DMTEST/$d/; done

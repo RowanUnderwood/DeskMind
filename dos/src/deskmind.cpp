@@ -24,10 +24,13 @@
 #include "net.h"
 #include "tpi.h"
 #include "slide.h"
+#include "music.h"
+#include "jukebox.h"
 
 enum { M_ABOUT = 300, M_SETTINGS, M_EXIT,
        M_CHAT, M_CHAT_NEW, M_CHAT_OPEN, M_CHAT_ATTACH,
-       M_CREATE, M_RULES, M_GALLERY, M_SYNC, M_SLIDES };
+       M_CREATE, M_RULES, M_GALLERY, M_SYNC, M_SLIDES,
+       M_MUSIC, M_MUSIC_RANDOM, M_MUSIC_STOP, M_MUSIC_SYNC, M_MUSIC_COMPOSE };
 
 static const MenuItem dmItems[]   = { { "About DeskMind...", M_ABOUT }, { "Settings...    F5", M_SETTINGS },
                                       { "-", 0 }, { "Exit", M_EXIT } };
@@ -36,9 +39,13 @@ static const MenuItem chatItems[] = { { "Chat           F2", M_CHAT }, { "New ch
 static const MenuItem picItems[]  = { { "Create         F3", M_CREATE }, { "Enhance rules...", M_RULES },
                                       { "-", 0 }, { "Gallery        F4", M_GALLERY }, { "Sync from server", M_SYNC },
                                       { "Slideshow      F6", M_SLIDES } };
-static const Menu s_menus[] = { { "DeskMind", dmItems, 4 }, { "Chat", chatItems, 4 }, { "Pictures", picItems, 6 } };
+static const MenuItem musItems[]  = { { "Music          F7", M_MUSIC }, { "Play random songs", M_MUSIC_RANDOM },
+                                      { "Stop music     F8", M_MUSIC_STOP }, { "-", 0 },
+                                      { "Compose a song...", M_MUSIC_COMPOSE }, { "Sync from server", M_MUSIC_SYNC } };
+static const Menu s_menus[] = { { "DeskMind", dmItems, 4 }, { "Chat", chatItems, 4 }, { "Pictures", picItems, 6 },
+                                { "Music", musItems, 6 } };
 
-const Menu *main_menus( int *n ) { *n = 3; return s_menus; }
+const Menu *main_menus( int *n ) { *n = 4; return s_menus; }
 
 static int s_screen = -1;
 
@@ -47,6 +54,7 @@ static void draw_screen( void ) {
     case SCR_CHAT:    chat_draw( ); break;
     case SCR_CREATE:  create_draw( ); break;
     case SCR_GALLERY: gallery_draw( ); break;
+    case SCR_MUSIC:   music_draw( ); break;
   }
 }
 
@@ -65,9 +73,27 @@ static void go( int scr ) {
 }
 
 static unsigned long s_lastPing = 0;
+static int s_musicChanged = 0;           // the jukebox moved on: the main loop redraws (not in dialogs)
 
 static void idle( void ) {
   if ( app_net ) net_poll( );
+  if ( jb_poll( ) ) s_musicChanged = 1;    // the next random song starts even while a dialog is open
+}
+
+// Compose (Music screen or menu): Chat, with the start of a request typed in
+static void compose( void ) {
+  go( SCR_CHAT );
+  if ( !music_available( ) ) { msg_box( "Compose", "Songs play on the Tandy sound chip, which this PC does not have.", "OK" ); return; }
+  chat_prefill( "Compose a song: " );
+  chat_draw( );
+  app_status( "Describe the song (mood, speed, style, for which pictures...) and press Enter." );
+}
+
+static void play_random( void ) {
+  int rc = jb_random( );
+  if ( rc ) app_status( "Cannot play: %s.", rc == MUS_NO_FILE ? "no songs yet (Music, F7)" : music_error( rc ) );
+  else app_status( "Random songs: %s", jb_now( ) );
+  app_menu_status( );
 }
 
 // ---------------------------------------------------------------- F9: sound check
@@ -94,7 +120,7 @@ static void sound_check( void ) {
     struct dostime_t t;
     _dos_getdate( &d );
     _dos_gettime( &t );
-    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.8.4 ===\n",
+    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.9.0 ===\n",
              s_f9Step, d.year, d.month, d.day, t.hour, t.minute, t.second );
     snd_diag( f );
     fclose( f );
@@ -122,6 +148,11 @@ static int run_command( int id ) {
     case M_GALLERY:     go( SCR_GALLERY ); break;
     case M_SYNC:        go( SCR_GALLERY ); gallery_sync( ); break;
     case M_SLIDES:      go( SCR_GALLERY ); gallery_slideshow( ); break;
+    case M_MUSIC:       go( SCR_MUSIC ); break;
+    case M_MUSIC_RANDOM: play_random( ); break;
+    case M_MUSIC_STOP:  jb_stop( ); app_menu_status( ); if ( s_screen == SCR_MUSIC ) music_draw( ); else app_status( "Music stopped." ); break;
+    case M_MUSIC_SYNC:  go( SCR_MUSIC ); music_sync( ); break;
+    case M_MUSIC_COMPOSE: compose( ); break;
   }
   return 0;
 }
@@ -154,7 +185,7 @@ int main( int argc, char *argv[] ) {
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( cfg_cga ? "DeskMind 0.8.4 (CGA)\n" : "DeskMind 0.8.4\n" );
+  printf( cfg_cga ? "DeskMind 0.9.0 (CGA)\n" : "DeskMind 0.9.0\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );
@@ -169,6 +200,7 @@ int main( int argc, char *argv[] ) {
   chat_init( );
   create_init( );
   gallery_init( );
+  music_init( );
   if ( !chat_ready( ) ) { printf( "Not enough memory.\n" ); if ( app_net ) net_done( ); return 1; }
 
   int gmode = cfg_cga ? VM_CGA2 : VM_640;
@@ -179,6 +211,7 @@ int main( int argc, char *argv[] ) {
     return 1;
   }
   snd_init( );
+  music_owner_hook = snd_music;           // songs take the chip: sound effects step aside
   vid_open( gmode );
   if ( !noMouse ) gui_init( );
   gui_idle = idle;
@@ -189,7 +222,13 @@ int main( int argc, char *argv[] ) {
 
   s_screen = SCR_CHAT;
   redraw_all( );
-  snd_play( SND_STARTUP );
+  // Startup sound: a 56k modem handshake when MindServer answered, else the old chime.
+  // The modem plays in the background (DeskMind is usable at once); any key or click stops it.
+  {
+    char modem[80];
+    sprintf( modem, "%sMODEM.T3", app_dir );
+    if ( !( cfg.sound && app_net && app_server.ok && jb_jingle( modem ) == MUS_OK ) ) snd_play( SND_STARTUP );
+  }
   if ( !app_net ) app_status( cfg_cga ? "Offline: the Gallery works; Chat and Create need the network (packet driver)."
                                       : "Offline: the Gallery works; Chat and Create need the network (boot with W)." );
   else if ( !app_server.ok ) app_status( "MindServer is not answering at %s:%u. Start it on the PC, or check Settings (F5).", cfg.server, cfg.port );
@@ -198,7 +237,14 @@ int main( int argc, char *argv[] ) {
   Event e;
   for ( int quit = 0; !quit; ) {
     gui_poll( &e );
+    if ( jb_mode( ) == JB_JINGLE && ( e.type == EV_KEY || e.type == EV_DOWN ) ) jb_stop( );   // the modem sound
     if ( e.type == EV_NONE ) {
+      if ( s_musicChanged ) {
+        s_musicChanged = 0;
+        app_menu_status( );
+        if ( s_screen == SCR_MUSIC ) music_tick( 1 );
+      }
+      else if ( s_screen == SCR_MUSIC ) music_tick( 0 );
       if ( app_net && ticks( ) - s_lastPing > 18ul * 120 ) {      // every two minutes, when idle
         int was = app_server.ok * 4 + app_server.qwen * 2 + app_server.comfy;
         app_ping( );
@@ -215,6 +261,8 @@ int main( int argc, char *argv[] ) {
         case K_F4: go( SCR_GALLERY ); continue;
         case K_F5: app_settings( ); continue;
         case K_F6: run_command( M_SLIDES ); continue;
+        case K_F7: go( SCR_MUSIC ); continue;
+        case K_F8: run_command( M_MUSIC_STOP ); continue;
         case K_F10: id = menubar_run( 0, 0 ); break;
         default:
           if ( menubar_key( e.key ) >= 0 ) id = menubar_run( menubar_key( e.key ), 0 );
@@ -235,8 +283,10 @@ int main( int argc, char *argv[] ) {
       case SCR_CHAT:    cmd = chat_event( &e ); break;
       case SCR_CREATE:  cmd = create_event( &e ); break;
       case SCR_GALLERY: cmd = gallery_event( &e ); break;
+      case SCR_MUSIC:   cmd = music_event( &e ); break;
     }
-    if ( cmd == CMD_GOTO_CHAT ) {
+    if ( cmd == CMD_GOTO_CHAT && music_compose_ask ) { music_compose_ask = 0; compose( ); }
+    else if ( cmd == CMD_GOTO_CHAT ) {
       go( SCR_CHAT );
       if ( gallery_ask_id[0] ) {
         chat_attach( gallery_ask_id );
@@ -245,9 +295,11 @@ int main( int argc, char *argv[] ) {
       }
     }
     else if ( cmd == CMD_GOTO_CREATE ) go( SCR_CREATE );
+    else if ( cmd == CMD_GOTO_MUSIC ) go( SCR_MUSIC );
     else if ( cmd == CMD_GOTO_GALLERY ) go( SCR_GALLERY );
   }
 
+  jb_stop( );
   gui_done( );
   snd_done( );
   vid_close( );

@@ -12,6 +12,11 @@ Transcript format (GET /chat/<id>, POST /chat/<id>/sync, and DeskMind's local .T
     >A               an assistant message starts
     !P <image id>    (inside a user message) the user attached this picture
     !I <id> <title>  (inside an assistant message) a picture was drawn
+    !M <id> <title>  (inside an assistant message) a song was composed (music.py; GET /music/<id>)
+
+Clients that can play songs ask with music=1: the system prompt then gets prompts/music_chat.txt and
+the reply stream can carry
+    M <id> <title>   a song is ready (download it with GET /music/<id>)
 """
 
 from __future__ import annotations
@@ -37,7 +42,8 @@ CHAT_DIR = os.path.join(DATA_DIR, "chats")
 PROMPT_DIR = os.path.join(HELPER_DIR, "prompts")
 PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "vision.txt",
            # A CGA PC (requests with mode=cga) gets its own version of each prompt
-           "chat_cga": "system_chat_cga.txt", "enhance_cga": "enhance_cga.txt", "vision_cga": "vision_cga.txt"}
+           "chat_cga": "system_chat_cga.txt", "enhance_cga": "enhance_cga.txt", "vision_cga": "vision_cga.txt",
+           "music_chat": "music_chat.txt", "music_spec": "music_spec.txt"}
 HISTORY_CHARS = 24000          # how much earlier conversation is sent along
 OLD_DRAW_NOTE = re.compile(r"\[You drew picture [0-9A-Za-z]{1,12}:[^\]]*\]", re.IGNORECASE)
 
@@ -123,6 +129,8 @@ class ChatStore:
             lines += TX.to_cp437(m.get("text", "")).split("\n")
             for d in m.get("drawn", []):
                 lines.append(f"!I {d['id']} {d.get('title', '')}".rstrip())
+            for s in m.get("music", []):
+                lines.append(f"!M {s['id']} {s.get('title', '')}".rstrip())
         return "\n".join(lines) + "\n"
 
     @staticmethod
@@ -141,6 +149,9 @@ class ChatStore:
             elif line.startswith("!I "):
                 parts = line[3:].split(" ", 1)
                 cur.setdefault("drawn", []).append({"id": parts[0].upper(), "title": parts[1] if len(parts) > 1 else ""})
+            elif line.startswith("!M "):
+                parts = line[3:].split(" ", 1)
+                cur.setdefault("music", []).append({"id": parts[0].upper(), "title": parts[1] if len(parts) > 1 else ""})
             else:
                 cur["text"] = (cur["text"] + "\n" + line) if cur["text"] else line
         for m in chat["messages"]:
@@ -153,10 +164,11 @@ class ChatStore:
 # ====================================================================== engine
 
 class ChatEngine:
-    def __init__(self, config: Config, store: Store, jobs, chats: ChatStore | None = None):
+    def __init__(self, config: Config, store: Store, jobs, chats: ChatStore | None = None, music=None):
         self.config = config
         self.store = store
         self.jobs = jobs
+        self.music = music              # music.MusicService, or None
         self.chats = chats or ChatStore()
         self.qwen = QwenClient(config)
         jobs.prepare = self._prepare_job
@@ -188,6 +200,8 @@ class ChatEngine:
             t = OLD_DRAW_NOTE.sub("", m.get("text", "")).strip()
             if m.get("drawn"):
                 t += "\n" + "\n".join(f"<draw>{self._drawn_prompt(d)}</draw>" for d in m["drawn"])
+            if m.get("music"):
+                t += "\n" + "\n".join(f"<music>{s.get('request') or s.get('title', '')}</music>" for s in m["music"])
             if m.get("image"):
                 t = f"[Attached picture {m['image']}]\n" + t
             used += len(t)
@@ -254,7 +268,7 @@ class ChatEngine:
     # ------------------------------------------------------------ chat reply
 
     def reply(self, chat_id: str | None, user_text: str, image_id: str | None, emit,
-              enhance_draw: bool | None = None, mode: str | None = None) -> dict:
+              enhance_draw: bool | None = None, mode: str | None = None, music: bool = False) -> dict:
         """`mode` is the asking machine's picture mode ("cga" for a CGA PC): it picks the prompts and
         the mode of pictures drawn in this reply.  None = the default (Tandy)."""
         user_text = user_text.strip()
@@ -272,7 +286,11 @@ class ChatEngine:
             emit("D")
             return chat
 
-        msgs = [{"role": "system", "content": self._system(mode)}] + self._history(chat)
+        music = music and self.music is not None
+        system = self._system(mode)
+        if music:                          # one system message only (see below)
+            system += "\n\n" + load_prompt("music_chat")
+        msgs = [{"role": "system", "content": system}] + self._history(chat)
         # The picture in view: the one attached now, or else the most recent one in this chat
         view_id, earlier = image_id, False
         if not view_id:
@@ -320,7 +338,7 @@ class ChatEngine:
             return chat
 
         answer = TX.clean("".join(visible_raw))
-        if not answer and not splitter.prompts:
+        if not answer and not splitter.prompts and not splitter.music:
             emit("E The answer was empty" + (" (cut off: raise max tokens)" if finish == "length" else ""))
         amsg = {"role": "assistant", "text": answer}
         chat["messages"].append(amsg)
@@ -328,8 +346,27 @@ class ChatEngine:
 
         if splitter.prompts:
             self._draw(chat, amsg, splitter.prompts[0], emit, enhance_draw, mode)
+        if splitter.music and music:
+            self._music(chat, amsg, splitter.music[0], emit)
         emit("D")
         return chat
+
+    def _music(self, chat: dict, amsg: dict, request: str, emit) -> None:
+        job = self.music.submit(request)
+        emit("S composing")
+        line = job.line()
+        deadline = time.time() + 10 * 60
+        while job.status not in ("done", "error") and time.time() < deadline:
+            new = self.music.wait_change(job, line, timeout=5.0)
+            if new == line:
+                emit("S composing")              # keep-alive for the Tandy's timeout
+            line = new
+        if job.status == "done":
+            emit(f"M {job.music_id} {job.title}".rstrip())
+            amsg.setdefault("music", []).append({"id": job.music_id, "title": job.title, "request": request})
+            self.chats.save(chat)
+        else:
+            emit(f"E Composing failed: {job.error or 'timed out'}")
 
     def _draw(self, chat: dict, amsg: dict, prompt: str, emit, enhance: bool | None,
               mode: str | None = None) -> None:

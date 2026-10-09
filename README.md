@@ -32,10 +32,10 @@ Tandy (boot W) --WiFi, HTTP port 8286--> MindServer (this PC)
 
 | Command | What it starts |
 |---|---|
-| `START-MINDSERVER.bat` | NInfer (Qwen), ComfyUI (Krea 2) and MindServer, each in its own window |
-| `START-MINDSERVER.bat noqwen` | ComfyUI and MindServer only. Pictures work, chat doesn't |
+| `START-MINDSERVER.bat` | NInfer (Qwen), ComfyUI (Krea 2), the music worker (MIDI-GPT) and MindServer, each in its own window |
+| `START-MINDSERVER.bat noqwen` | ComfyUI, the music worker and MindServer. Pictures and songs work, chat doesn't |
 | `START-MINDSERVER.bat server` | MindServer only (Dither Lab, tests) |
-| `STOP-MINDSERVER.bat` | Stops all three |
+| `STOP-MINDSERVER.bat` | Stops them all |
 
 A service that already answers is not started twice.
 
@@ -48,25 +48,35 @@ its model, and MindServer warns in its log and console. Stop and start NInfer to
 or games. It then runs with a 65,536-token context, far more than DeskMind needs. If Qwen isn't running, DeskMind says so and
 names this PC's address. Create can still draw your prompt as typed, without Qwen.
 
+**The music worker** (`Labtext2midi\launch-music-worker.bat`, http://127.0.0.1:8287) runs MIDI-GPT on the **RTX 3090**
+(chosen by its UUID) in the Labtext2midi Python environment. The model loads in about a second; a song takes 3 to 6 seconds.
+Without it, DeskMind still plays the songs it has, but nothing new can be composed.
+
 ### The MindServer window
 
 | Tab | What it's for |
 |---|---|
-| **Services** | Status lights for NInfer, ComfyUI and MindServer, start/stop buttons, the Qwen model choice and the model running now, the log, and which Tandy is connected |
+| **Services** | Status lights for NInfer, ComfyUI, the music worker and MindServer, start/stop buttons, the Qwen model choice and the model running now, the log, and which Tandy is connected |
 | **Generation** | Workflow dropdown (any ComfyUI API-format workflow in `helper\workflows\`: Krea 2 Turbo, Krea 2 fine V5), its settings (steps, picture size, LoRA; remembered per workflow) and a test generation. The chosen workflow is used for everything, including Create and chat drawings on the Tandy |
 | **Dither Lab** | Try dithering settings on any picture: the original beside the Tandy version at the right shape, plus a pixel zoom. Save the settings as the default |
 | **Gallery** | The pictures MindServer holds |
+| **Music** | The songs MindServer holds: play the preview (made from the exact register stream the Tandy plays), rename, delete, and compose one from a description |
 | **AI** | Qwen settings and the three instruction texts: chat, prompt improvement, and picture questions (`helper\prompts\*.txt`) |
 | **Tandy** | Port, optional token, and the 16-colour palette |
 
-Pictures are kept in `helper\data\images\` (the original PNG plus the Tandy files) and chats in `helper\data\chats\`.
+Pictures are kept in `helper\data\images\` (the original PNG plus the Tandy files), chats in `helper\data\chats\` and
+songs in `helper\data\music\` (`<id>.t3` for the Tandy, `.mid`, a `.wav` preview and `.json` with the request and settings).
 
 ---
 
 ## On the Tandy: DeskMind
 
 **Boot with W** (the PicoMEM WiFi boot), then type **`DESKMIND`** at any prompt. `C:\PLAY\DESKMIND.BAT` goes to `C:\DESKMIND`
-and starts it. Without WiFi, DeskMind starts offline: the Gallery and slideshow work, Chat and Create don't.
+and starts it. Without WiFi, DeskMind starts offline: the Gallery, slideshow and Music work, Chat and Create don't.
+
+**Start-up sound:** when MindServer answers, DeskMind greets you with a 6-second 56k modem handshake (dial tone, digits,
+ring, answer tone, the "bong" and the hiss) on the Tandy's sound chip; any key or click stops it, and DeskMind is usable
+at once. Offline, or when MindServer doesn't answer, it plays the old chime. Sound effects off (Settings) mutes both.
 
 The first time, open **Settings (F5)** and check the MindServer address (this PC's LAN IP, e.g. `192.168.2.192`) and port `8286`.
 
@@ -96,8 +106,9 @@ itself, and on the Tandy `DESKMIND /CGA` (or `SLIDES /CGA`) tries it out.
 
 | Key | |
 |---|---|
-| **F2** Chat, **F3** Create, **F4** Gallery, **F5** Settings, **F6** Slideshow | Switch screens |
-| **F10** or **Alt + first letter** | Menus (DeskMind, Chat, Pictures) |
+| **F2** Chat, **F3** Create, **F4** Gallery, **F5** Settings, **F6** Slideshow, **F7** Music | Switch screens |
+| **F8** | Stop the music |
+| **F10** or **Alt + first letter** | Menus (DeskMind, Chat, Pictures, Music) |
 | **Tab / Shift+Tab** | Next or previous control |
 | **Enter** | The default (outlined) button |
 | **Esc** | Cancel a dialog, or stop a reply or drawing in progress |
@@ -110,6 +121,10 @@ Everything also works with the mouse (CuteMouse must be loaded).
 - Type and press **Enter** (or Send). The reply streams in. **PgUp/PgDn**, the arrow keys and the scroll bar scroll.
 - **Ask for a picture in plain words** ("draw a castle at sunset"). Qwen draws it, and the thumbnail appears in the chat.
   **Click a thumbnail** to see it full screen.
+- **Ask for music** ("make a fast cracktro tune for the space pictures", "a slow spooky song"). Qwen asks the composer
+  on the PC for a song, and a few seconds later a **song card** (♪ title) appears and the song starts playing.
+  **Click the card** to play or stop it. Songs are also in the Music screen (F7). Qwen can't hear the songs; it tells you
+  what it asked for.
 - **Picture** attaches a gallery picture to your next message, so you can ask about it ("what's in this picture?"). Qwen sees both the
   original and the 16-colour version. It keeps the latest picture in mind for follow-up questions.
 - **Chats** lists the chats saved on this Tandy (newest first) to reopen or delete. **New** starts a fresh chat.
@@ -138,6 +153,33 @@ Everything also works with the mouse (CuteMouse must be loaded).
 - **Sync** downloads the pictures MindServer has and the Tandy doesn't (e.g. ones made in the Dither Lab).
 - **Slideshow** starts with the selected picture.
 
+### Music (F7)
+
+Your songs, newest first, with their length and date. Music keeps playing while you chat, draw or look at pictures,
+and DeskMind's own little sounds stay quiet meanwhile. **F8** stops it from anywhere; a ♪ in the menu bar shows that
+something plays.
+
+| Button | |
+|---|---|
+| **Play** | Play the selected song once (Enter or a double-click too) |
+| **Loop** | Play it over and over |
+| **Random** | Random songs, one after another |
+| **Stop** | Stop the music |
+| **Rename** / **Delete** | Change the title, or delete the song (**Everywhere** = on MindServer too) |
+| **Sync** | Download the songs MindServer has and this Tandy doesn't |
+| **Compose** | Go to Chat with "Compose a song:" typed in: describe it and press Enter |
+
+**What a song is:** three square-wave voices (a lead tune, an accompaniment and a bass line) plus noise drums (hi-hats,
+snare, and a short kick that borrows the bass voice for 42 ms). MIDI-GPT writes the tune and the bass over chords and
+patterns from a style recipe; the accompaniment, the form (intro, themes, break, ending), the drums and the final cadence
+are composed in code. Three styles: **cracktro** (fast demo-scene, 140-160 BPM, minor), **adventure** (bright game
+melody, 104-128 BPM, major) and **dungeon** (slow and dark, 72-96 BPM, minor). Songs are 1 to 3 minutes and at most
+30,000 bytes; they play from conventional memory while a song is on (the slideshow keeps EMS).
+
+The first song, **Raster Rush**, comes with DeskMind: the drum version that was checked on the real TL/3.
+
+Music needs the Tandy sound chip: on a CGA PC the Music screen says so (a Tandy in `/CGA` mode plays music).
+
 ### Settings (F5)
 
 | Setting | |
@@ -148,6 +190,7 @@ Everything also works with the mouse (CuteMouse must be loaded).
 | Create: let me edit the improved prompt first | The default for the Create screen |
 | Chat: also improve prompts of pictures Qwen draws | Better pictures, a few seconds slower |
 | Slideshow seconds / Effect / random order | Used by the Gallery slideshow and by SLIDES |
+| Slideshow music | **Off**, **random songs**, or **the song last played** in the Music screen (looped). Music that already plays when a slideshow starts keeps playing |
 
 Saved in `C:\DESKMIND\DESKMIND.CFG`.
 
@@ -158,7 +201,7 @@ Saved in `C:\DESKMIND\DESKMIND.CFG`.
 In DeskMind: **F6**, the Gallery's **Slideshow** button, or Pictures > Slideshow. From DOS: **`SLIDES`**.
 
 ```
-SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS]
+SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS] [/M R|OFF|song]
 
   folder     default: DeskMind's PICS folder
   /D n       seconds per picture (default from DeskMind's Settings, else 8)
@@ -169,6 +212,8 @@ SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/NOEMS
   /ONCE      stop after the last picture (default: loop)
   /LIST      print the play order and exit
   /NOEMS     keep the picture buffer out of EMS (it then needs 63K of DOS memory)
+  /M x       music: R = random songs, OFF = none, or a song (its name in C:\DESKMIND\MUSIC,
+             or a path to a .T3 file) looped.  Default: DeskMind's "Slideshow music" setting
 ```
 
 | Key | |
@@ -193,6 +238,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 |---|---|---|
 | Pictures in the Gallery | 500 | The newest 500 show, with "Showing the newest 500 of N". Sync stops when the Gallery is full |
 | Pictures in SLIDES | 500 | The newest 500 play |
+| Songs | 150 on the Tandy, 30,000 bytes each (1-3 minutes) | The newest 150 are listed. Sync fetches up to 40 at a time |
 | Memory | Help > About shows free DOS memory, EMS, and where a slideshow would go | The slideshow's 63K picture buffer goes into EMS when there is some (the Tandy has 4 MB), so it costs no DOS memory. "slideshow needs 63K" means it won't start now |
 | Pictures in the "attach a picture" list | 200 | The newest 200 are listed |
 | Saved chats in the Chats list | 100 | The newest 100 are listed, with "newest 100 of N" |
@@ -211,6 +257,8 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 | `C:\DESKMIND\PICS\<id>.TPI` | Pictures: header, prompt, thumbnail and the full 640x200 picture in one file |
 | `C:\DESKMIND\PICSCGA\<id>.TPI` | CGA pictures (CGA mode only), about 17K each |
 | `C:\DESKMIND\CHATS\<id>.TCH` | Chat transcripts (plain text) |
+| `C:\DESKMIND\MUSIC\<id>.T3`, `SONGS.LST` | Songs (register streams for the sound chip) and their titles |
+| `C:\DESKMIND\MODEM.T3` | The online start-up sound |
 | `C:\DESKMIND\README.TXT` | Short version of this guide |
 | `C:\PLAY\DESKMIND.BAT`, `SLIDES.BAT` | Launchers (made by the games project's `tools\stage.py`) |
 
@@ -223,6 +271,7 @@ Nothing crashes at these limits. DeskMind says when a list is cut short.
 | "No network ... DeskMind starts offline" | Boot with **W**. The packet driver only loads in the WiFi boot |
 | "MindServer is not answering" | Start `START-MINDSERVER.bat` on the PC. Check the address in Settings, and run `setup-firewall.bat` once |
 | "Qwen (NInfer) is not running on the MindServer PC" | Start NInfer after a clean boot of the PC (it needs the 5090's memory), or wait until it has loaded |
+| "The music composer is ... not running on the PC" | Start the music worker (MindServer's Services tab, or `START-MINDSERVER.bat`) |
 | "Not enough memory for the slideshow" | Without EMS the slideshow needs 63K of DOS memory. Start a new chat or restart DeskMind |
 | Colours look off | Brown (colour 6) differs between monitors. Change it in MindServer's Tandy tab. Pictures made after that use it |
 

@@ -2,8 +2,8 @@
 rem ============================================================
 rem  MindServer launcher (DeskMind helper)
 rem
-rem    START-MINDSERVER            NInfer (5090) + ComfyUI (4090) + MindServer
-rem    START-MINDSERVER noqwen     ComfyUI + MindServer (no chat)
+rem    START-MINDSERVER            NInfer (5090) + ComfyUI (4090) + music worker (3090) + MindServer
+rem    START-MINDSERVER noqwen     ComfyUI + music worker + MindServer (no chat)
 rem    START-MINDSERVER server     MindServer only (tests, dithering)
 rem
 rem  NInfer starts first because it is the pickiest about free
@@ -50,6 +50,18 @@ if not errorlevel 1 (
 ) else (
     echo Starting ComfyUI ^(Krea2, RTX 4090^)...
     start "ComfyUI (4090)" cmd /c call "%HERE%run_comfy_image.bat"
+)
+
+rem The music worker (MIDI-GPT on the RTX 3090) composes DeskMind's songs
+set "MUSIC=%HERE%Labtext2midi\launch-music-worker.bat"
+call :alive http://127.0.0.1:8287/health
+if not errorlevel 1 (
+    echo The music worker is already running - not starting it again.
+) else if exist "%MUSIC%" (
+    echo Starting the music worker ^(MIDI-GPT, RTX 3090^)...
+    start "Music worker (3090)" cmd /c call "%MUSIC%"
+) else (
+    echo No music worker in Labtext2midi - DeskMind can play songs but not compose new ones.
 )
 
 :server

@@ -11,6 +11,8 @@
 //   /R         random order
 //   /NOTITLE   no title strip
 //   /ONCE      stop after the last picture (default: loop)
+//   /M x       music: R = random songs, OFF = none, or a song (a name in DeskMind's MUSIC
+//              folder, or a path to a .T3 file) played in a loop.  Default: DeskMind's setting
 //   /NOEMS     keep the picture buffer out of EMS (it uses 63K of DOS memory then)
 //
 // Keys: Space/Enter/Right next, Left back, P pause, T titles, E try effects, Esc quit.
@@ -27,6 +29,8 @@
 #include "cfg.h"
 #include "tpi.h"
 #include "slide.h"
+#include "music.h"
+#include "jukebox.h"
 
 struct Entry { char name[13]; unsigned long when; };
 static Entry *s_e = 0;
@@ -44,12 +48,16 @@ static int path_of( void *, int i, char *out ) {
   return 1;
 }
 
+static void poll_music( void ) { jb_poll( ); }
+
 static void usage( void ) {
   printf( "SLIDES - DeskMind slideshow for the Tandy 1000 SL/TL/RL (640x200x16) and CGA PCs\n\n"
-          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA] [/NOEMS]\n\n"
+          "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA] [/NOEMS]\n"
+          "         [/M R|OFF|song]\n\n"
           "  /CGA: CGA pictures (automatic on a PC without Tandy Video II)\n"
           "  /R: random order (or tick \"Slideshow: random order\" in DeskMind's Settings)\n"
           "  /LIST: print the play order and exit\n"
+          "  /M: music: R random songs, OFF none, or a song (name in the MUSIC folder or a .T3 path)\n"
           "  /E: 0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds, 5 interlace,\n"
           "      6 dissolve, 7 box out, 8 box in, 9 slide in\n\n"
           "  Keys: Space/Right next, Left back, P pause, T titles, E effects, Esc quit\n" );
@@ -76,7 +84,9 @@ int main( int argc, char *argv[] ) {
   o.titles = 1;
   o.shuffle = cfg.slide_shuffle;       // Settings: "Slideshow: random order"
   o.loop = 1;
+  o.poll = poll_music;
   int bench = 0, noMouse = 0, listOnly = 0;
+  const char *song = 0;                // /M with a song name or path
   str_copy( s_dir, haveCfg ? cfg_pics( ) : ".", sizeof( s_dir ) );
 
   for ( int i = 1; i < argc; i++ ) {
@@ -91,6 +101,12 @@ int main( int argc, char *argv[] ) {
     else if ( str_ieq( a, "/LIST" ) ) listOnly = 1;
     else if ( str_ieq( a, "/NOMOUSE" ) ) noMouse = 1;
     else if ( str_ieq( a, "/NOEMS" ) ) slide_no_ems = 1;
+    else if ( str_ieq( a, "/M" ) && i + 1 < argc ) {
+      a = argv[++i];
+      if ( str_ieq( a, "OFF" ) ) cfg.slide_music = 0;
+      else if ( str_ieq( a, "R" ) ) cfg.slide_music = 1;
+      else song = a;
+    }
     else if ( str_ieq( a, "/CGA" ) ) ;
     else if ( a[0] != '/' ) str_copy( s_dir, a, sizeof( s_dir ) );
     else { printf( "Unknown option %s\n\n", a ); usage( ); return 1; }
@@ -163,9 +179,21 @@ int main( int argc, char *argv[] ) {
     if ( f ) fclose( f );
     return 0;
   }
+  // Music: a song given with /M loops; otherwise DeskMind's setting (random songs, or the
+  // song last played in its Music screen)
+  int music = 0, mrc = MUS_OK;
+  if ( song ) {
+    char path[80];
+    if ( strchr( song, '\\' ) || strchr( song, '.' ) ) str_copy( path, song, sizeof( path ) );
+    else jb_path( path, song );
+    music = ( mrc = music_play( path, 1 ) ) == MUS_OK;
+  }
+  else music = jb_slides_begin( );
   int shown = slide_run( s_n, -1, path_of, 0, &o );   // -1: from the oldest (or random)
+  if ( music ) jb_stop( );
   vid_close( );
   vid_unreserve( );
+  if ( mrc ) printf( "No music: %s (%s).\n", music_error( mrc ), song );
   if ( !shown ) printf( "Not enough memory for the picture buffer (slideshow %s).\n", slide_mem_note( ) );
   printf( "%d picture%s shown from %s.\n", shown, shown == 1 ? "" : "s", s_dir );
   return 0;
