@@ -178,7 +178,11 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   86Box `vm\dm_ems` (SL/2 + Lo-tech EMS, `[Other peripherals]` frame C0000 because XT-IDE's ROM is at D000; LTEMM.EXE
   /p:C000 /i:260 in CONFIG.SYS, image `vm\dm_ems.img` made from dm_test.img): SLIDES from EMS and with /NOEMS both
   play 6/6 oldest first; MEM conventional and EMS free identical before and after. 86Box crashed (0x53dee3) on some runs.
-  On the card (backups `..._before/after-deskmind-084-ems.img`); About and the real-TL/3 slideshow from EMS still to check.
+  On the card (backups `..._before/after-deskmind-084-ems.img`); Real TL/3 W boot (2026-10-09, photos 20261009_145823/150243/150349): About says "slideshow in EMS"; free
+  **160K** at startup, **123K** after a chat with a drawing, **89K** after a Gallery slideshow (5 shown, worked). Each later
+  drop is not a leak we can see: Watcom never returns freed memory to DOS, and dialogs' save-unders (About itself is about
+  34K) leave reusable holes, so About's DOS figure is a lower bound. The earlier 83K W-startup reading (0.8.4 before EMS)
+  is unexplained; probably not a fresh start. Check later whether the figure levels off with use.
 - Limits never fail silently now:
   - Gallery `MAX_PICS` 500, picker 200, chat list 100: all keep the **newest** entries when full (DOS returns files in
     folder order) and say "newest N of M".
