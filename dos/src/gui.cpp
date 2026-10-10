@@ -187,8 +187,25 @@ void ui_status( const char *text ) {
   gui_mouse_show( );
 }
 
+// Save-unders are exact DOS blocks, given back to DOS on restore.  From the C heap, Settings'
+// 41K one took about 76K from DOS for good (the far heap grows past the request and never
+// shrinks), which About showed as a 145K -> 69K drop.  The heap is only the fallback.
+#define MAX_DOS_SAVES 8
+static unsigned s_saveSeg[ MAX_DOS_SAVES ];
+
 unsigned char far *ui_save( int x, int y, int w, int h ) {
-  unsigned char far *buf = (unsigned char far *)_fmalloc( vid_save_size( w, h ) );
+  unsigned size = vid_save_size( w, h );
+  unsigned char far *buf = 0;
+  for ( int i = 0; i < MAX_DOS_SAVES; i++ ) {
+    unsigned seg;
+    if ( s_saveSeg[i] ) continue;
+    if ( _dos_allocmem( (unsigned)( ( size + 15ul ) >> 4 ), &seg ) == 0 ) {
+      s_saveSeg[i] = seg;
+      buf = (unsigned char far *)MK_FP( seg, 0 );
+    }
+    break;
+  }
+  if ( !buf ) buf = (unsigned char far *)_fmalloc( size );
   if ( buf ) {
     gui_mouse_hide( );
     vid_save( x, y, w, h, buf );
@@ -202,6 +219,13 @@ void ui_restore( int x, int y, int w, int h, unsigned char far *buf ) {
   gui_mouse_hide( );
   vid_restore( x, y, w, h, buf );
   gui_mouse_show( );
+  if ( FP_OFF( buf ) == 0 )
+    for ( int i = 0; i < MAX_DOS_SAVES; i++ )
+      if ( s_saveSeg[i] && s_saveSeg[i] == FP_SEG( buf ) ) {
+        _dos_freemem( s_saveSeg[i] );
+        s_saveSeg[i] = 0;
+        return;
+      }
   _ffree( buf );
 }
 

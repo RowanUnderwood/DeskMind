@@ -25,7 +25,7 @@ LINK = wlink system dos option quiet option map option eliminate option stack=81
 .cpp: ..\src;..\spike;$(MTCP)\TCPLIB
 .asm: $(MTCP)\TCPLIB
 
-all: hdrs.chk $(OUT)\DESKMIND.EXE $(OUT)\SLIDES.EXE $(OUT)\GUITEST.EXE $(OUT)\V640.EXE $(OUT)\NETTEST.EXE $(OUT)\SNDTEST.EXE $(OUT)\MUSTEST.EXE .SYMBOLIC
+all: hdrs.chk $(OUT)\DESKMIND.EXE $(OUT)\SLIDES.EXE $(OUT)\GUITEST.EXE $(OUT)\V640.EXE $(OUT)\NETTEST.EXE $(OUT)\SNDTEST.EXE $(OUT)\MUSTEST.EXE $(OUT)\SAVETEST.EXE .SYMBOLIC
 
 hdrs.chk: $(HDRS)
   @if exist *.obj del *.obj
@@ -50,6 +50,9 @@ $(OUT)\SNDTEST.EXE: $(TCPOBJS) net.obj video.obj fonthi.obj sound.obj sys.obj sn
   $(LINK) name $@ file { $< }
 
 $(OUT)\MUSTEST.EXE: video.obj fonthi.obj music.obj sys.obj mustest.obj
+  $(LINK) name $@ file { $< }
+
+$(OUT)\SAVETEST.EXE: $(LIBOBJS) savetest.obj
   $(LINK) name $@ file { $< }
 
 # sound.cpp holds an interrupt handler that runs on other programs' stacks: -zu (SS is not

@@ -218,7 +218,12 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     Memory (W boot, About = largest DOS block): 145K after a cold start, **69K after only opening Settings**, 69K after a
     slideshow, 61K with a song playing. The Settings drop is its ~41K save-under (`ui_save` of 466x175): Watcom's far heap grows
     for it (like the 64000-byte case, more than the request) and keeps the memory for reuse, never returning it to DOS.
-    Not a leak, but About under-reports; exact DOS blocks for big save-unders would fix that (offered, not done).
+    Not a leak, but About under-reports.
+  - **0.9.2 (2026-10-10): save-unders are exact DOS blocks.** `ui_save` takes `_dos_allocmem` (up to 8 open at once,
+    `s_saveSeg`), `ui_restore` frees it (offset 0 + listed segment), `_fmalloc` only as the fallback. `SAVETEST.EXE`
+    (dos\spike, unattended): 20 rounds of the Settings (41,125 bytes in 640 mode) + message box (12,160) save-unders, restored
+    in both orders, screen checksum and largest DOS block identical after each, heap fallback with DOS full. PASS on 86Box
+    SL/2 640 mode and DOSBox Tandy `SAVETEST C`; 86Box `dm_ems` crashed (0x53dee3) on all 4 tries mid-test.
 - **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
   AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
   mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports

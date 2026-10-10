@@ -1,5 +1,18 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 9.2: DeskMind 0.9.2, dialogs give their memory back
+
+**Your round 9.1 finding:** Help > About went from 145K to 69K just by opening Settings. Each dialog saves the screen
+under it (Settings: 41K). That came from the C heap, which took about 76K from DOS for it and kept it. Now every
+save-under is its own DOS block, handed back when the dialog closes (the heap is only the fallback).
+
+1. **W boot**, cold start, Help > About: note the free memory (was 145K).
+2. Settings (F5), Cancel, About again: **about the same** as step 1 (was 69K).
+3. Chat with a drawing, a Gallery slideshow, a song: About after each. Drops now come from what the screens keep
+   (chat text, thumbnails), not from dialogs.
+4. Optional: `CD \DMTEST`, `SAVETEST`: every line PASS (20 rounds of the Settings + message box save-unders, free DOS
+   memory identical after each).
+
 ## Round 9.1: DeskMind 0.9.1, slideshow memory fix
 
 **Your round 9 test 3** ("Music: random songs" in Settings, then a slideshow: "Not enough memory for the slideshow").
