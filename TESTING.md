@@ -45,7 +45,7 @@ Checked in 86Box and DOSBox only: every chip write on its tick, BIOS clock right
    **Loop** repeats it; **Random** goes on to the next song (with one song: Raster Rush again).
 3. Settings (F5): **Music: random songs**, Save, then F6: music starts with the slideshow and stops with it.
    From DOS: `SLIDES /M RASTER` loops Raster Rush during the show, `SLIDES /M OFF` none.
-4. After about an hour with music on and off: `TIME` at the DOS prompt should match a clock (the BIOS clock keeps going).
+4. After about an hour with music on and off: `TIME` at the DOS prompt should match a clock (the BIOS clock keeps going). **Skipped (2026-10-10, user): MUSTEST on the TL/3 counted 1400 BIOS ticks vs 1398 expected.**
 5. **W boot** with MindServer running on the PC (START-MINDSERVER starts the music worker on the 3090 too):
    DeskMind greets you with the **56k modem handshake** (about 6 s; any key stops it).
 6. Chat: **"make a fast cracktro song for the space pictures"** (or "a slow spooky dungeon tune"). A song card (note +
