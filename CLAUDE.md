@@ -224,6 +224,10 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     (dos\spike, unattended): 20 rounds of the Settings (41,125 bytes in 640 mode) + message box (12,160) save-unders, restored
     in both orders, screen checksum and largest DOS block identical after each, heap fallback with DOS full. PASS on 86Box
     SL/2 640 mode and DOSBox Tandy `SAVETEST C`; 86Box `dm_ems` crashed (0x53dee3) on all 4 tries mid-test.
+    **Real TL/3 (2026-10-10, W boot): confirmed.** About 145K cold, **145K after Settings/Cancel** (was 69K), 145K with a
+    chat holding a message and a picture, 129K with random songs playing (the song's DOS block), 136K after a 2-picture
+    slideshow with chat and Gallery thumbs open and a different (smaller) song playing. SAVETEST all PASS on the TL/3
+    (photo `20261010_050814.jpg`). Memory headroom for new features is now ~130K+ in normal use.
 - **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
   AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
   mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports
