@@ -210,6 +210,15 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     `slide_fail_note()` says why a show didn't start; `ems_err` keeps the last EMS AH; `SLIDES /LIST` prints the buffer line.
     The 0.8.4 86Box "SLIDES from EMS" result was therefore the DOS fallback. Now 86Box `dm_ems`: `/LIST` "in EMS", an EMS show
     ran 6/6 and exited, an EMS show with music played (screenshot); other runs died on 86Box's 0x53dee3 crash (also with /NOEMS).
+  - **Real TL/3 round 9 + 9.1 (2026-10-10): music confirmed.** About "slideshow in EMS"; Settings slideshow music works;
+    no skips during sync/chat/scroll; modem start-up online, chime offline; chat songs (fast cracktro, slow dungeon) compose,
+    download, play/stop from the card; MindServer-composed songs sync; "everything sounds ok". MUSTEST on the TL/3: all PASS,
+    10,595 of 10,595 writes on their tick, BIOS ticks 1400 vs 1398 expected (photo `20261010_042543.jpg`). The 1-hour TIME
+    check (round 9 step 4) is on hold; MUSTEST's tick count covers most of it.
+    Memory (W boot, About = largest DOS block): 145K after a cold start, **69K after only opening Settings**, 69K after a
+    slideshow, 61K with a song playing. The Settings drop is its ~41K save-under (`ui_save` of 466x175): Watcom's far heap grows
+    for it (like the 64000-byte case, more than the request) and keeps the memory for reuse, never returning it to DOS.
+    Not a leak, but About under-reports; exact DOS blocks for big save-unders would fix that (offered, not done).
 - **Measured memory (real TL/3, 0.8.4, Normal boot = offline, 2026-10-09):** Help > About "Free memory" (largest DOS block,
   AH=48h) = **160K** at startup (Chat screen open), **61K** after Gallery thumbs + a 2-picture slideshow. The 99K drop is
   mostly the 64K slideshow buffer, which Watcom's far heap keeps for reuse instead of returning to DOS, so About under-reports
