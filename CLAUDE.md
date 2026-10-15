@@ -321,7 +321,7 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     Python, next VCF Midwest searched; Tandy RAM, Austen not; PicoMEM -> search + read_page by result id; 1-4 s each.
     **`full` model not tested yet** (needs an NInfer restart; ask first).
   - DeskMind 0.9.3: only a status text "Searching the web: <query>" (older clients show "Qwen is thinking").
-    On the card (backups `..._before/after-deskmind-093.img`). Real TL/3 test pending.
+    On the card (backups `..._before/after-deskmind-093.img`). **User confirmed working on the real TL/3 (2026-10-15).**
 - **Missing chat pictures (2026-10-04, chat DF21D117 / picture C7B1069D).** The server had the picture; the Tandy's download after the
   reply failed and was ignored, leaving a grey thumbnail and "Could not show this picture". Cause of that one failure unknown (no log, possibly WiFi),
   but `net.cpp` chose local ports with an **unseeded `rand()`**, so every run reused the same port sequence; now `next_port()` starts at
