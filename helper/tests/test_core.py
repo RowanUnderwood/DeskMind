@@ -315,6 +315,121 @@ def test_profiles():
     print("profiles ok")
 
 
+def test_tool_history():
+    from mindserver.chat import ChatEngine
+
+    class FakeStore:
+        def exists(self, i):
+            return i == "AABBCCDD"
+
+        def meta(self, i):
+            return {"prompt": "the stored prompt"}
+
+    eng = ChatEngine.__new__(ChatEngine)
+    eng.store = FakeStore()
+    chat = {"messages": [
+        {"role": "user", "text": "draw a cat"},
+        {"role": "assistant", "text": "Here!", "drawn": [{"id": "AABBCCDD", "title": "A cat"}]},  # synced: no prompt
+        {"role": "user", "text": "who won?"},
+        {"role": "assistant", "text": "Norris won.", "tools": [
+            {"name": "web_search", "args": {"query": "f1"}, "summary": "1. Norris wins"}]},
+        {"role": "user", "text": "song and picture"},
+        {"role": "assistant", "text": "Sure:\n[You drew picture A4B2C3D1: a fake one]",
+         "drawn": [{"id": "11111111", "title": "T", "prompt": "saved"}],
+         "music": [{"id": "22222222", "title": "Tune", "request": "a fast tune"}]},
+        {"role": "user", "text": "thanks"}]}
+    h = eng._history(chat, tools=True)
+    roles = [m["role"] for m in h]
+    assert roles == ["user", "assistant", "tool", "user", "assistant", "tool", "assistant", "user",
+                     "assistant", "tool", "tool", "user"], roles
+    assert h[1]["content"] == "Here!" and h[1]["tool_calls"][0]["function"]["name"] == "draw_picture"
+    assert '"the stored prompt"' in h[1]["tool_calls"][0]["function"]["arguments"]
+    assert "AABBCCDD" not in h[2]["content"] and "A cat" in h[2]["content"]
+    assert h[4]["content"] is None and h[5]["content"] == "1. Norris wins" and h[6]["content"] == "Norris won."
+    assert h[8]["content"] == "Sure:" and [c["function"]["name"] for c in h[8]["tool_calls"]] == \
+        ["draw_picture", "compose_music"]
+    ids = [c["id"] for m in h for c in m.get("tool_calls", [])]
+    assert len(ids) == len(set(ids)) == 4
+    assert sorted(ids) == sorted(m["tool_call_id"] for m in h if m["role"] == "tool")
+    assert not any("You drew" in str(m.get("content")) for m in h)
+    assert eng._history(chat)[1]["content"] == "Here!\n<draw>the stored prompt</draw>"   # tags mode unchanged
+    print("tool history ok")
+
+
+def test_tool_reply():
+    """The reply loop with a scripted Qwen: search round, draw after the reply, and the tags fallback."""
+    from mindserver.chat import ChatEngine, ChatStore
+    from mindserver.config import Config
+    from mindserver.qwen import QwenError
+
+    class FakeQwen:
+        def __init__(self, script, reject=False):
+            self.script, self.reject, self.requests = list(script), reject, []
+
+        def stream(self, msgs, effort=None, max_tokens=None, tools=None):
+            self.requests.append((list(msgs), tools))
+            if tools and self.reject:
+                raise QwenError("Qwen error 400: tools", 400)
+            text, calls = self.script.pop(0)
+            for k in range(0, len(text), 5):
+                yield "content", text[k:k + 5]
+            for c in calls:
+                yield "tool_call", c
+            yield "done", "tool_calls" if calls else "stop"
+
+    class FakeSearch:
+        def available(self):
+            return True
+
+        def search(self, q):
+            return f"results for {q}"
+
+        def read(self, u):
+            return f"page {u}"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def engine(qwen):
+            eng = ChatEngine.__new__(ChatEngine)
+            eng.config, eng.store, eng.music = Config(os.path.join(tmp, "s.json")), None, None
+            eng.chats, eng.qwen, eng.search = ChatStore(os.path.join(tmp, "chats")), qwen, FakeSearch()
+            eng.drawn = []
+            eng._draw = lambda chat, amsg, prompt, emit, enh, mode: eng.drawn.append(prompt)
+            return eng
+
+        q = FakeQwen([("Let me check.", [{"id": "c1", "name": "web_search", "args": {"query": "f1 winner"}}]),
+                      ("Norris won, says the BBC. Here's a car:",
+                       [{"id": "c2", "name": "draw_picture", "args": {"prompt": "a  red car"}}])])
+        eng, lines = engine(q), []
+        chat = eng.reply(None, "who won? draw a car", None, lines.append)
+        text = "".join(ln[2:] if ln.startswith("T ") else "\n" if ln == "N" else "" for ln in lines)
+        assert "S searching f1 winner" in lines and lines[-1] == "D", lines
+        assert "Let me check." in text and "Norris won" in text, text
+        assert eng.drawn == ["a red car"], eng.drawn
+        msgs, tools = q.requests[1]
+        assert msgs[-2]["tool_calls"][0]["id"] == "c1" and msgs[-1] == \
+            {"role": "tool", "tool_call_id": "c1", "content": "results for f1 winner"}
+        assert {t["function"]["name"] for t in q.requests[0][1]} == {"draw_picture", "web_search", "read_page"}
+        a = chat["messages"][-1]
+        assert a["tools"][0]["summary"] == "results for f1 winner" and "Norris won" in a["text"]
+        assert "web_search" in q.requests[0][0][0]["content"] and "<draw>" not in q.requests[0][0][0]["content"]
+
+        # Search rounds are capped: the last request offers no search tools
+        loop = [("", [{"id": f"s{i}", "name": "web_search", "args": {"query": f"q{i}"}}]) for i in range(3)]
+        q = FakeQwen(loop + [("Gave up.", [])])
+        eng = engine(q)
+        eng.reply(None, "search forever", None, lambda ln: None)
+        assert len(q.requests) == 4 and {t["function"]["name"] for t in q.requests[-1][1]} == {"draw_picture"}
+
+        # NInfer rejects tools: the same reply is made with tags
+        q = FakeQwen([("Here: <draw>a boat</draw>", [])], reject=True)
+        eng, lines = engine(q), []
+        chat = eng.reply(None, "draw a boat", None, lines.append)
+        assert eng.drawn == ["a boat"] and q.requests[-1][1] is None
+        assert "<draw>" in q.requests[-1][0][0]["content"]
+        assert [m["role"] for m in chat["messages"]] == ["user", "assistant"], chat["messages"]
+    print("tool reply ok")
+
+
 if __name__ == "__main__":
     test_tpi_roundtrip()
     test_pack_bits()
@@ -327,6 +442,8 @@ if __name__ == "__main__":
     test_text_stream()
     test_old_draw_note()
     test_history()
+    test_tool_history()
+    test_tool_reply()
     test_transcript()
     test_music_splitter()
     test_music_transcript()

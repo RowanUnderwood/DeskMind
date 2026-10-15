@@ -299,6 +299,29 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
   `gallery_rescan()` (Create does), so they appeared only after a Sync or restart. `scr_chat.cpp` now rescans when it
   downloaded any. Installed on the card (only `DESKMIND\DESKMIND.EXE` changed; backups `..._before/after-deskmind-chatgallery.img`);
   user confirmed on the real TL/3 (2026-10-04).
+- **Tool calls + web search (0.9.3, 2026-10-15; plan `~\.claude\plans\1-i-ve-noticed-through-curious-beacon.md`).**
+  Chat asks for pictures/songs/searches with OpenAI **tool calls** instead of `<draw>`/`<music>` tags (`qwen.tools`, default on).
+  Feasibility on thinkingcap: 24/24 tool-or-not decisions right (draw, music, both, search, none), streaming delivers each call as
+  one complete chunk, `role: tool` results accepted (no 400), injected instructions in results ignored. **History must be replayed
+  as real tool calls**: a plain-text "[drew picture ...]" note made Qwen copy the note (1 of 2), the old bug again.
+  - `qwen.stream(..., tools=)` yields `("tool_call", {id, name, args})`; `QwenError.status`. `tools.py`: schemas
+    (`draw_picture`, `compose_music` only with music=1, `web_search`/`read_page` only when search works) and `replay()`
+    (stored `drawn`/`music`/`tools` -> assistant tool_calls + tool results; picture IDs left out: Qwen quoted them back).
+  - `chat.reply` -> `_answer(tools)`: draw/compose need no second Qwen round (made after the reply as before); a search round
+    emits `S searching <query>`, feeds results back and loops (`search.max_rounds` 3; the last round offers no search).
+    Assistant messages keep `tools: [{name, args, summary (1500 chars)}]` (not in the Tandy transcript; a Tandy sync drops it).
+    NInfer 400 on tools -> the reply is redone with tags. `DrawSplitter` stays on as a safety net in tool mode.
+  - Prompts: `system_chat[_cga].txt` lost the picture paragraphs, now in `draw_tags[_cga].txt` (tags mode, verbatim);
+    tool mode adds `tools_chat[_cga].txt` + `search_chat.txt` + `music_tools.txt`. Originals `helper\out\*.bak-20261015`.
+  - `search.py`: own small MCP stdio JSON-RPC client (no async SDK) for **mcp-web-search-tool 2.1.0**, pinned in
+    `helper\mcp` (`npm ci`; node_modules ignored). DuckDuckGo, no key. Search ~1 s, page ~0.6 s; JSON duplicate cut,
+    HTML entities unescaped. Server process starts on the first search, restarts once if it died, stops with MindServer.
+  - Tests: `test_core` (`test_tool_history`, `test_tool_reply`: search round, round cap, 400 fallback); `qwen_smoke` 16/16
+    on thinkingcap (redraw via history, song, picture + song, search, no search for 12x12/joke). Probe: weather, newest
+    Python, next VCF Midwest searched; Tandy RAM, Austen not; PicoMEM -> search + read_page by result id; 1-4 s each.
+    **`full` model not tested yet** (needs an NInfer restart; ask first).
+  - DeskMind 0.9.3: only a status text "Searching the web: <query>" (older clients show "Qwen is thinking").
+    On the card (backups `..._before/after-deskmind-093.img`). Real TL/3 test pending.
 - **Missing chat pictures (2026-10-04, chat DF21D117 / picture C7B1069D).** The server had the picture; the Tandy's download after the
   reply failed and was ignored, leaving a grey thumbnail and "Could not show this picture". Cause of that one failure unknown (no log, possibly WiFi),
   but `net.cpp` chose local ports with an **unseeded `rand()`**, so every run reused the same port sequence; now `next_port()` starts at

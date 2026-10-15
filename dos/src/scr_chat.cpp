@@ -854,6 +854,11 @@ static void send_message( void ) {
         state = t;
       }
       else if ( !strncmp( arg, "composing", 9 ) ) state = "Composing the song on the PC...  (Esc = stop)";
+      else if ( !strncmp( arg, "searching", 9 ) ) {
+        static char w[72];
+        sprintf( w, "Searching the web: %.32s  (Esc = stop)", arg[9] ? arg + 10 : "" );
+        state = w;
+      }
       else state = "Qwen is thinking...  (Esc = stop)";
       app_spin( state );
     }

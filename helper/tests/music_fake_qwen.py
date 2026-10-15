@@ -23,7 +23,7 @@ from mindserver.server import MindServer  # noqa: E402
 REPLY = "Here is a fast cracktro tune for you! <music>a fast cracktro tune with full drums</music>"
 
 
-def fake_stream(msgs, effort=None, max_tokens=None):
+def fake_stream(msgs, effort=None, max_tokens=None, tools=None):
     if any("ONE JSON object" in str(m.get("content", "")) for m in msgs):     # the spec request
         yield "content", '{"style": "cracktro", "energy": "high", "drums": "full", "length": "short", "title": "Fake Qwen Rush"}'
     else:

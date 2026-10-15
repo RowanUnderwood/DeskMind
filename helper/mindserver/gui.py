@@ -959,9 +959,18 @@ class AITab(QWidget):
         self.max_tokens = QSpinBox(); self.max_tokens.setRange(300, 32000); self.max_tokens.setValue(q["max_tokens"])
         self.draw_enhance = QCheckBox("Also enhance pictures drawn from chat (slower)")
         self.draw_enhance.setChecked(bool(q.get("draw_enhance", False)))
+        self.tools = QCheckBox("Tool calls for pictures, songs and search (off = <draw>/<music> tags)")
+        self.tools.setChecked(bool(q.get("tools", True)))
+        self.search = QCheckBox("Web search in chat (DuckDuckGo, needs tool calls)")
+        self.search.setChecked(bool(win.config["search"].get("enabled", True)))
+        self.search_state = QLabel()
+        self.search_state.setStyleSheet("color: #888")
         f.addRow("Temperature", self.temperature)
         f.addRow("Max tokens", self.max_tokens)
         f.addRow(self.draw_enhance)
+        f.addRow(self.tools)
+        f.addRow(self.search)
+        f.addRow(self.search_state)
         b = QPushButton("Save settings"); b.clicked.connect(self.save)
         f.addRow(b)
         left.addWidget(box)
@@ -970,14 +979,18 @@ class AITab(QWidget):
         pl = QVBoxLayout(pb)
         row = QHBoxLayout()
         self.which = QComboBox()
-        self.which.addItems(["chat", "enhance", "vision", "chat_cga", "enhance_cga", "vision_cga"])
+        self.which.addItems(["chat", "tools_chat", "search_chat", "music_tools", "enhance", "vision",
+                             "chat_cga", "tools_chat_cga", "enhance_cga", "vision_cga",
+                             "draw_tags", "draw_tags_cga", "music_chat"])
         self.which.currentTextChanged.connect(self.load_prompt)
         b_save = QPushButton("Save prompt"); b_save.clicked.connect(self.save_prompt)
         row.addWidget(QLabel("Prompt:")); row.addWidget(self.which); row.addStretch(); row.addWidget(b_save)
         pl.addLayout(row)
         self.prompt = QPlainTextEdit()
         pl.addWidget(self.prompt)
-        hint = QLabel("chat: {date} = today.   vision: {image_id}, {title}, {prompt} = the attached picture.")
+        hint = QLabel("A chat's system prompt = chat + tools_chat (+ search_chat, + music_tools for the Tandy);\n"
+                      "with tool calls off: chat + draw_tags (+ music_chat).   {date} = today.   "
+                      "vision: {image_id}, {title}, {prompt} = the attached picture.")
         hint.setStyleSheet("color: #888")
         pl.addWidget(hint)
         left.addWidget(pb, 1)
@@ -1002,6 +1015,7 @@ class AITab(QWidget):
         self.chat_id = None
         self.chat_line.connect(self.show_line)
         self.load_prompt("chat")
+        self.show_search_state()
 
     # ------------------------------------------------------------ settings and prompts
 
@@ -1009,10 +1023,19 @@ class AITab(QWidget):
         q = self.win.config["qwen"]
         q.update(url=self.url.text().strip(), model=self.model.text().strip(),
                  temperature=round(self.temperature.value(), 2), max_tokens=self.max_tokens.value(),
-                 draw_enhance=self.draw_enhance.isChecked(),
+                 draw_enhance=self.draw_enhance.isChecked(), tools=self.tools.isChecked(),
                  **{k: c.currentText() for k, c in self.efforts.items()})
+        self.win.config["search"]["enabled"] = self.search.isChecked()
         self.win.config.save()
+        self.show_search_state()
         log.info("Qwen settings saved")
+
+    def show_search_state(self):
+        problem = self.win.server.chat.search.problem()
+        if not self.win.config["qwen"].get("tools", True):
+            problem = "needs tool calls"
+        self.search_state.setText(f"Web search: {problem}" if problem else
+                                  "Web search: ready (mcp-web-search-tool in helper\\mcp)")
 
     def load_prompt(self, name):
         from .chat import load_prompt
@@ -1066,8 +1089,8 @@ class AITab(QWidget):
             self.win.gallery.refresh()
         elif line.startswith("E "):
             cur.insertText(f"\n[error: {line[2:]}]\n")
-        elif line.startswith("S drawing"):
-            pass
+        elif line.startswith("S searching"):
+            cur.insertText(f"[searching: {line[12:]}] ")
         self.transcript.setTextCursor(cur)
         self.transcript.ensureCursorVisible()
 

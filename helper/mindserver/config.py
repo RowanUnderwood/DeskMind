@@ -28,6 +28,7 @@ DEFAULTS = {
         "temperature": 0.0,                 # 0 = the model's own default
         "max_tokens": 4000,                 # thinking uses this budget too
         "draw_enhance": False,              # also run the enhancer on prompts from <draw> in chat
+        "tools": True,                      # chat uses tool calls (draw_picture, ...); False = <draw> tags
     },
     "comfy": {
         "url": "http://127.0.0.1:8188",
@@ -52,6 +53,14 @@ DEFAULTS = {
         "url": "http://127.0.0.1:8287",     # the MIDI-GPT worker (RTX 3090)
         "worker_bat": os.path.join(PROJECT_DIR, "Labtext2midi", "launch-music-worker.bat"),
         "effort_spec": "low",               # Qwen effort for turning a description into a song spec
+    },
+    "search": {                             # web search in chat (search.py, needs "tools")
+        "enabled": True,
+        "node": "node",                     # Node.js for the MCP server in helper\mcp
+        "count": 5,                         # results per search
+        "max_chars": 6000,                  # per search result / page sent to Qwen
+        "max_rounds": 3,                    # searches/page reads in one reply before Qwen must answer
+        "timeout": 20,
     },
     "dither": DitherSettings(engine="pillow", method="floyd-steinberg").to_dict(),
 }

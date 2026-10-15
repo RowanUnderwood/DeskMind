@@ -2,8 +2,9 @@
 
     .venv\\Scripts\\python -m tests.qwen_smoke [--url http://127.0.0.1:8286] [--keep]
 
-Needs MindServer, NInfer and ComfyUI running.  Runs chat, chat memory, Markdown cleanup, <draw> in chat,
-a vision follow-up on the drawn picture, vision on an attached gallery picture and the prompt enhancer.
+Needs MindServer, NInfer, ComfyUI and the music worker running.  Runs chat, chat memory, Markdown cleanup,
+drawing in chat, a vision follow-up and a redraw on the drawn picture, songs (music=1), web search (and two
+questions that must not search), vision on an attached gallery picture and the prompt enhancer.
 Prints a summary and writes out\\qwen_smoke_<model>.json (model from NInfer's current-model.txt), so runs
 against thinkingcap and full can be compared.  Test chats and drawn pictures are deleted unless --keep.
 """
@@ -51,16 +52,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:8286")
     ap.add_argument("--keep", action="store_true", help="keep the test chats and drawn pictures")
+    ap.add_argument("--no-music", action="store_true", help="skip the song cases (no music worker)")
     args = ap.parse_args()
     url = args.url.rstrip("/")
     model, ctx = ninfer_running(Config())
-    results, chats, images = [], [], []
+    results, chats, images, songs = [], [], [], []
 
     def case(name: str, lines: list[str], secs: float, ok: bool, why: str = ""):
         err = first(lines, "E")
         if err:
             ok, why = False, f"E {err}"
-        bad = [ln for ln in lines if "<draw" in ln or "</draw" in ln or "<think" in ln]
+        bad = [ln for ln in lines if any(tag in ln for tag in ("<draw", "</draw", "<music", "<think", "<tool"))]
         if bad:
             ok, why = False, f"tag leaked: {bad[0][:60]}"
         text = reply_text(lines)
@@ -70,9 +72,8 @@ def main() -> int:
         c = first(lines, "C")
         if c and c not in chats:
             chats.append(c)
-        i = first(lines, "I")
-        if i:
-            images.append(i.split()[0])
+        images.extend(ln[2:].split()[0] for ln in lines if ln.startswith("I "))
+        songs.extend(ln[2:].split()[0] for ln in lines if ln.startswith("M "))
 
     print(f"NInfer model: {model or '?'}, context {ctx or '?'}")
     print(httpx.get(url + "/ping", timeout=5).text.strip().replace("\n", " | "))
@@ -116,6 +117,29 @@ def main() -> int:
     if img:
         lines, s = post_stream(url, "/chat", "What colours are strongest in that picture? One sentence.", {"id": did})
         case("vision follow-up", lines, s, bool(reply_text(lines).strip()))
+        lines, s = post_stream(url, "/chat", "Lovely. Now draw the same lighthouse at sunrise.", {"id": did})
+        case("redraw (history)", lines, s, bool(first(lines, "I")), "" if first(lines, "I") else "no picture")
+
+    if not args.no_music:
+        lines, s = post_stream(url, "/chat", "Make me a short, slow and spooky dungeon tune.", {"music": "1"})
+        m = first(lines, "M")
+        case("song in chat", lines, s, bool(m) and not first(lines, "I"), "" if m else "no song (M line)")
+        lines, s = post_stream(url, "/chat", "Draw a haunted castle at night and make a spooky song to go with it.",
+                               {"music": "1"})
+        case("picture + song", lines, s, bool(first(lines, "I")) and bool(first(lines, "M")),
+             f"I {bool(first(lines, 'I'))}, M {bool(first(lines, 'M'))}")
+
+    # Web search (needs qwen.tools and search.enabled on the server)
+    lines, s = post_stream(url, "/chat", "Who won the most recent Formula 1 Grand Prix, and where was it?")
+    q = first(lines, "S searching")
+    t = reply_text(lines)
+    case("web search", lines, s, bool(q) and len(t.strip()) > 20 and "http" not in t,
+         f"query: {q}" if q else "did not search")
+    for ask in ("What is 12 times 12?", "Tell me a joke about floppy disks."):
+        lines, s = post_stream(url, "/chat", ask)
+        q = first(lines, "S searching")
+        case("no search: " + ask[:12], lines, s, not q and bool(reply_text(lines).strip()),
+             f"searched for: {q}" if q else "")
 
     pics = httpx.get(url + "/list", timeout=10).text.splitlines()
     pic = next((p for p in pics if p.split()[0] not in images), None)
@@ -133,6 +157,8 @@ def main() -> int:
             httpx.post(f"{url}/chat/{c}/del", timeout=10)
         for i in images:
             httpx.post(f"{url}/img/{i}/del", timeout=10)
+        for m in songs:
+            httpx.post(f"{url}/music/{m}/del", timeout=10)
 
     out = os.path.join(HELPER_DIR, "out", f"qwen_smoke_{model or 'unknown'}.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)

@@ -26,6 +26,8 @@ Tandy (boot W) --WiFi, HTTP port 8286--> MindServer (this PC)
 ### First time only
 
 1. The Python environment is `helper\.venv`. If it's missing, `START-MINDSERVER.bat` prints the two commands that create it.
+1. For web search in chat: install Node.js (20.18 or newer), then in `helper\mcp` run `npm ci` (it installs the pinned
+   `mcp-web-search-tool` from `package-lock.json`). Without it, chat works but can't search.
 2. Run **`setup-firewall.bat`** once. It asks for administrator rights and opens TCP port 8286 to the local network only.
 
 ### Every time
@@ -61,7 +63,7 @@ Without it, DeskMind still plays the songs it has, but nothing new can be compos
 | **Dither Lab** | Try dithering settings on any picture: the original beside the Tandy version at the right shape, plus a pixel zoom. Save the settings as the default |
 | **Gallery** | The pictures MindServer holds |
 | **Music** | The songs MindServer holds: play the preview (made from the exact register stream the Tandy plays), rename, delete, and compose one from a description |
-| **AI** | Qwen settings and the three instruction texts: chat, prompt improvement, and picture questions (`helper\prompts\*.txt`) |
+| **AI** | Qwen settings (including tool calls and web search on/off) and the instruction texts in `helper\prompts\*.txt`: chat, the tool/search/music parts added to it, prompt improvement and picture questions |
 | **Tandy** | Port, optional token, and the 16-colour palette |
 
 Pictures are kept in `helper\data\images\` (the original PNG plus the Tandy files), chats in `helper\data\chats\` and
@@ -125,6 +127,10 @@ Everything also works with the mouse (CuteMouse must be loaded).
   on the PC for a song, and a few seconds later a **song card** (♪ title) appears and the song starts playing.
   **Click the card** to play or stop it. Songs are also in the Music screen (F7). Qwen can't hear the songs; it tells you
   what it asked for.
+- **Ask about the news, the weather or anything recent** ("who won the last F1 race?", "what's the weather in Minneapolis?").
+  Qwen searches the web on the PC (DuckDuckGo), reads a page if it needs to, and answers in its own words, naming the source.
+  The status line says "Searching the web: ..." meanwhile. It doesn't search for things it already knows. **Privacy:** the
+  search words go to DuckDuckGo. Switch search off in MindServer's AI tab.
 - **Picture** attaches a gallery picture to your next message, so you can ask about it ("what's in this picture?"). Qwen sees both the
   original and the 16-colour version. It keeps the latest picture in mind for follow-up questions.
 - **Chats** lists the chats saved on this Tandy (newest first) to reopen or delete. **New** starts a fresh chat.

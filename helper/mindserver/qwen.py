@@ -2,6 +2,8 @@
 
 NInfer returns the private reasoning as `reasoning_content` and the answer as
 `content`.  `reasoning_effort` can be set per request: none | low | medium | xhigh.
+With `tools` (OpenAI function schemas) it can also answer with `tool_calls`; NInfer streams each
+call as one complete chunk, but the pieces are joined by `index` anyway in case that changes.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ from .config import Config
 
 
 class QwenError(RuntimeError):
-    pass
+    def __init__(self, msg: str, status: int = 0):
+        super().__init__(msg)
+        self.status = status          # HTTP status from NInfer, 0 = no answer
 
 
 def lan_ip() -> str:
@@ -55,6 +59,14 @@ def image_part(img: Image.Image, max_side: int = 1024, png: bool = False) -> dic
             "image_url": {"url": f"data:{mime};base64," + base64.b64encode(buf.getvalue()).decode("ascii")}}
 
 
+def _args(text: str) -> dict | None:
+    try:
+        a = json.loads(text) if text.strip() else {}
+    except ValueError:
+        return None
+    return a if isinstance(a, dict) else None
+
+
 class QwenClient:
     def __init__(self, config: Config):
         self.config = config
@@ -76,25 +88,32 @@ class QwenClient:
                 raise not_running() from e
         return self._model
 
-    def _body(self, messages: list, effort: str, max_tokens: int | None, stream: bool) -> dict:
+    def _body(self, messages: list, effort: str, max_tokens: int | None, stream: bool,
+              tools: list | None = None) -> dict:
         q = self.config["qwen"]
         body = {"model": self.model(), "messages": messages, "stream": stream,
                 "max_tokens": int(max_tokens or q["max_tokens"])}
+        if tools:
+            body["tools"] = tools
         if effort:
             body["reasoning_effort"] = effort
         if q.get("temperature"):
             body["temperature"] = float(q["temperature"])
         return body
 
-    def stream(self, messages: list, effort: str = "low", max_tokens: int | None = None) -> Iterator[tuple[str, str]]:
-        """Yields ('reasoning', text), ('content', text) and finally ('done', finish_reason)."""
-        body = self._body(messages, effort, max_tokens, True)
+    def stream(self, messages: list, effort: str = "low", max_tokens: int | None = None,
+               tools: list | None = None) -> Iterator[tuple[str, object]]:
+        """Yields ('reasoning', text), ('content', text), then ('tool_call', {"id", "name", "args"}) for
+        each tool call (args = the parsed JSON object, None if it wasn't valid JSON), and finally
+        ('done', finish_reason)."""
+        body = self._body(messages, effort, max_tokens, True, tools)
         timeout = httpx.Timeout(connect=5, read=300, write=30, pool=5)
         try:
             with httpx.stream("POST", self.url + "/v1/chat/completions", json=body, timeout=timeout) as r:
                 if r.status_code != 200:
-                    raise QwenError(f"Qwen error {r.status_code}: {r.read().decode(errors='replace')[:200]}")
-                finish = "stop"
+                    raise QwenError(f"Qwen error {r.status_code}: {r.read().decode(errors='replace')[:200]}",
+                                    r.status_code)
+                finish, calls = "stop", {}
                 for line in r.iter_lines():
                     if not line.startswith("data:"):
                         continue
@@ -108,8 +127,16 @@ class QwenClient:
                             yield "reasoning", d["reasoning_content"]
                         if d.get("content"):
                             yield "content", d["content"]
+                        for tc in d.get("tool_calls") or []:
+                            c = calls.setdefault(tc.get("index", len(calls)), {"id": "", "name": "", "args": ""})
+                            f = tc.get("function") or {}
+                            c["id"] = tc.get("id") or c["id"]
+                            c["name"] += f.get("name") or ""
+                            c["args"] += f.get("arguments") or ""
                         if ch.get("finish_reason"):
                             finish = ch["finish_reason"]
+                for n, c in sorted(calls.items()):
+                    yield "tool_call", {"id": c["id"] or f"call_{n}", "name": c["name"], "args": _args(c["args"])}
                 yield "done", finish
         except httpx.HTTPError as e:
             raise not_running() from e

@@ -14,9 +14,16 @@ Transcript format (GET /chat/<id>, POST /chat/<id>/sync, and DeskMind's local .T
     !I <id> <title>  (inside an assistant message) a picture was drawn
     !M <id> <title>  (inside an assistant message) a song was composed (music.py; GET /music/<id>)
 
-Clients that can play songs ask with music=1: the system prompt then gets prompts/music_chat.txt and
-the reply stream can carry
+Clients that can play songs ask with music=1: the system prompt then gets the music prompt and the
+reply stream can carry
     M <id> <title>   a song is ready (download it with GET /music/<id>)
+
+Qwen asks for pictures, songs and web searches with tool calls (tools.py; setting qwen.tools).  A web
+search adds a status line while it runs:
+    S searching <query>
+With qwen.tools off, or if NInfer rejects tools, Qwen writes <draw>/<music> tags instead (text.DrawSplitter,
+which also stays on in tool mode as a safety net).  System prompt = system_chat + (tools_chat [+ search_chat]
+[+ music_tools]) or (draw_tags [+ music_chat]).
 """
 
 from __future__ import annotations
@@ -32,8 +39,10 @@ from datetime import datetime
 
 from . import dither as D
 from . import text as TX
+from . import tools as TL
 from .config import DATA_DIR, HELPER_DIR, Config
 from .qwen import QwenClient, QwenError, image_part
+from .search import SearchError, WebSearch
 from .store import Store, make_title
 
 log = logging.getLogger("mindserver.chat")
@@ -43,7 +52,10 @@ PROMPT_DIR = os.path.join(HELPER_DIR, "prompts")
 PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "vision.txt",
            # A CGA PC (requests with mode=cga) gets its own version of each prompt
            "chat_cga": "system_chat_cga.txt", "enhance_cga": "enhance_cga.txt", "vision_cga": "vision_cga.txt",
-           "music_chat": "music_chat.txt", "music_spec": "music_spec.txt"}
+           "music_chat": "music_chat.txt", "music_spec": "music_spec.txt",
+           # How Qwen draws/composes/searches: tool calls, or the older <draw>/<music> tags
+           "tools_chat": "tools_chat.txt", "tools_chat_cga": "tools_chat_cga.txt", "search_chat": "search_chat.txt",
+           "music_tools": "music_tools.txt", "draw_tags": "draw_tags.txt", "draw_tags_cga": "draw_tags_cga.txt"}
 HISTORY_CHARS = 24000          # how much earlier conversation is sent along
 OLD_DRAW_NOTE = re.compile(r"\[You drew picture [0-9A-Za-z]{1,12}:[^\]]*\]", re.IGNORECASE)
 
@@ -163,6 +175,10 @@ class ChatStore:
 
 # ====================================================================== engine
 
+class _ToolsRejected(Exception):
+    """NInfer answered 400 to a request with tools: the reply is retried with <draw> tags."""
+
+
 class ChatEngine:
     def __init__(self, config: Config, store: Store, jobs, chats: ChatStore | None = None, music=None):
         self.config = config
@@ -171,12 +187,25 @@ class ChatEngine:
         self.music = music              # music.MusicService, or None
         self.chats = chats or ChatStore()
         self.qwen = QwenClient(config)
+        self.search = WebSearch(config)
         jobs.prepare = self._prepare_job
 
     # ------------------------------------------------------------ helpers
 
-    def _system(self, mode: str | None = None) -> str:
-        return load_prompt("chat", mode).replace("{date}", datetime.now().strftime("%A %d %B %Y"))
+    def _system(self, mode: str | None = None, tools: bool = False, music: bool = False,
+                search: bool = False) -> str:
+        parts = [load_prompt("chat", mode)]
+        if tools:
+            parts.append(load_prompt("tools_chat", mode))
+            if search:
+                parts.append(load_prompt("search_chat"))
+            if music:
+                parts.append(load_prompt("music_tools"))
+        else:
+            parts.append(load_prompt("draw_tags", mode))
+            if music:
+                parts.append(load_prompt("music_chat"))
+        return "\n\n".join(parts).replace("{date}", datetime.now().strftime("%A %d %B %Y"))
 
     def _drawn_prompt(self, d: dict) -> str:
         """What was drawn: the saved prompt, else the picture's own (chats synced from the Tandy keep only
@@ -189,15 +218,25 @@ class ChatEngine:
                 return p
         return d.get("title", "")
 
-    def _history(self, chat: dict) -> list[dict]:
+    def _history(self, chat: dict, tools: bool = False) -> list[dict]:
         """Earlier messages, newest kept first until the character budget runs out.
 
-        A past drawing appears as the <draw> tag Qwen wrote, the form it must use again. (A note like
-        "[You drew picture ID: ...]" used to be added instead, and Qwen sometimes copied the note rather
-        than drawing; such lines saved in old replies are left out.)"""
-        out, used = [], 0
+        A past drawing appears in the form Qwen must use again: with tools as a draw_picture call and its
+        result (tools.replay; songs and searches too), else as the <draw> tag.  (A note like "[You drew
+        picture ID: ...]" used to be added instead, and Qwen sometimes copied the note rather than drawing;
+        such lines saved in old replies are left out.)"""
+        out, used, n = [], 0, 1
         for m in reversed(chat["messages"]):
             t = OLD_DRAW_NOTE.sub("", m.get("text", "")).strip()
+            if tools and m["role"] == "assistant":
+                group = TL.replay(t, m.get("drawn", []), m.get("music", []), m.get("tools", []),
+                                  self._drawn_prompt, n)
+                n += len(m.get("drawn", [])) + len(m.get("music", [])) + len(m.get("tools", []))
+                used += sum(len(g.get("content") or "") + len(json.dumps(g.get("tool_calls", ""))) for g in group)
+                if used > HISTORY_CHARS and out:
+                    break
+                out += reversed(group)
+                continue
             if m.get("drawn"):
                 t += "\n" + "\n".join(f"<draw>{self._drawn_prompt(d)}</draw>" for d in m["drawn"])
             if m.get("music"):
@@ -287,10 +326,21 @@ class ChatEngine:
             return chat
 
         music = music and self.music is not None
-        system = self._system(mode)
-        if music:                          # one system message only (see below)
-            system += "\n\n" + load_prompt("music_chat")
-        msgs = [{"role": "system", "content": system}] + self._history(chat)
+        if self.config["qwen"].get("tools", True):
+            try:
+                return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, True)
+            except _ToolsRejected as e:
+                log.warning("NInfer rejected tool calls (%s); this reply uses <draw> tags", e)
+                chat["messages"].pop()             # the user message _answer added; it is added again
+        return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, False)
+
+    def _answer(self, chat: dict, user_text: str, image_id: str | None, emit, enhance_draw: bool | None,
+                mode: str | None, music: bool, tools: bool) -> dict:
+        """One reply, with tool calls (`tools`) or with tags."""
+        search = tools and self.search.available()
+        # One system message only: Qwen chat templates (ThinkingCap's at least) reject a later one
+        system = self._system(mode, tools, music, search)
+        msgs = [{"role": "system", "content": system}] + self._history(chat, tools)
         # The picture in view: the one attached now, or else the most recent one in this chat
         view_id, earlier = image_id, False
         if not view_id:
@@ -299,7 +349,6 @@ class ChatEngine:
                 view_id, earlier = recent, True
         if view_id:
             parts, two = self._vision_parts(view_id, mode)
-            # One system message only: Qwen chat templates (ThinkingCap's at least) reject a later one
             msgs[0]["content"] += "\n\n" + self._vision_text(view_id, earlier, two, mode)
             content = parts + [{"type": "text", "text": user_text}]
             effort = self.config["qwen"]["effort_vision"]
@@ -315,18 +364,52 @@ class ChatEngine:
 
         splitter, tt = TX.DrawSplitter(), TX.TandyText()
         visible_raw, finish, last_alive = [], "stop", 0.0
+        draws, songs, searches = [], [], []
+        max_rounds = int(self.config["search"].get("max_rounds", 3))
+        rnd = 0
         try:
-            for kind, t in self.qwen.stream(msgs, effort):
-                if kind == "reasoning" and time.time() - last_alive > 5:
-                    emit("S thinking")               # also a keep-alive for the Tandy's timeout
-                    last_alive = time.time()
-                elif kind == "content":
-                    vis = splitter.feed(t)
-                    visible_raw.append(vis)
-                    for line in tt.feed(vis):
+            while True:
+                schema = TL.schemas(music, search and rnd < max_rounds, mode) if tools else None
+                calls, said = [], []
+                try:
+                    for kind, t in self.qwen.stream(msgs, effort, tools=schema):
+                        if kind == "reasoning" and time.time() - last_alive > 5:
+                            emit("S thinking")       # also a keep-alive for the Tandy's timeout
+                            last_alive = time.time()
+                        elif kind == "content":
+                            said.append(t)
+                            vis = splitter.feed(t)
+                            visible_raw.append(vis)
+                            for line in tt.feed(vis):
+                                emit(line)
+                        elif kind == "tool_call":
+                            calls.append(t)
+                        elif kind == "done":
+                            finish = t
+                except QwenError as e:
+                    if tools and rnd == 0 and e.status == 400 and not said and not calls:
+                        raise _ToolsRejected(str(e)) from e
+                    raise
+                for c in calls:
+                    a = c["args"]
+                    if a is None:
+                        log.warning("tool call %s: the arguments aren't a JSON object", c["name"])
+                    elif c["name"] == TL.DRAW and str(a.get("prompt", "")).strip():
+                        draws.append(" ".join(str(a["prompt"]).split()))
+                    elif c["name"] == TL.MUSIC and music:
+                        songs.append(TL.music_request(a))
+                if not search or rnd >= max_rounds or not any(
+                        c["name"] in TL.SEARCH_TOOLS and c["args"] is not None for c in calls):
+                    break
+                # Search, hand Qwen the results, and let it go on with the same reply
+                if "".join(said).strip():
+                    visible_raw.append("\n\n")
+                    for line in tt.feed("\n\n"):
                         emit(line)
-                elif kind == "done":
-                    finish = t
+                msgs.append(TL.call_msg(calls, "".join(said)))
+                for c in calls:
+                    msgs.append(TL.result_msg(c["id"], self._run_tool(c, emit, searches, music)))
+                rnd += 1
             rest = splitter.finish()
             visible_raw.append(rest)
             for line in tt.feed(rest) + tt.flush():
@@ -337,19 +420,47 @@ class ChatEngine:
             self.chats.save(chat)
             return chat
 
+        draws += splitter.prompts                    # tags still count in tool mode
+        songs += splitter.music
         answer = TX.clean("".join(visible_raw))
-        if not answer and not splitter.prompts and not splitter.music:
+        if not answer and not draws and not songs:
             emit("E The answer was empty" + (" (cut off: raise max tokens)" if finish == "length" else ""))
         amsg = {"role": "assistant", "text": answer}
+        if searches:
+            amsg["tools"] = searches
         chat["messages"].append(amsg)
         self.chats.save(chat)
 
-        if splitter.prompts:
-            self._draw(chat, amsg, splitter.prompts[0], emit, enhance_draw, mode)
-        if splitter.music and music:
-            self._music(chat, amsg, splitter.music[0], emit)
+        if draws:
+            self._draw(chat, amsg, draws[0], emit, enhance_draw, mode)
+        if songs and music:
+            self._music(chat, amsg, songs[0], emit)
         emit("D")
         return chat
+
+    def _run_tool(self, call: dict, emit, searches: list, music: bool) -> str:
+        """The result for one tool call in a search round.  Searches are run and recorded in `searches`
+        (with a shortened result, for later turns); a picture or song asked for in the same round is only
+        acknowledged here and made after the reply, like any other."""
+        name, a = call["name"], call["args"] or {}
+        if name == TL.DRAW:
+            return "The picture will be drawn when your reply is finished; it then appears in the chat."
+        if name == TL.MUSIC:
+            return ("The song will be composed when your reply is finished; it then appears in the chat."
+                    if music else "Songs can't be played on this computer.")
+        if name not in TL.SEARCH_TOOLS:
+            return f"There is no tool called {name}."
+        what = " ".join(str(a.get("query") or a.get("id_or_url") or "").split())
+        emit(f"S searching {TX.to_cp437(what)[:60]}".rstrip())
+        t0 = time.time()
+        try:
+            text = self.search.search(what) if name == TL.SEARCH else self.search.read(what)
+            log.info("%s %r: %d characters in %.1f s", name, what, len(text), time.time() - t0)
+        except SearchError as e:
+            log.warning("%s %r: %s", name, what, e)
+            text = f"The search did not work ({e}). Tell the user you could not look it up just now."
+        searches.append({"name": name, "args": a, "summary": text[:TL.SUMMARY_CHARS]})
+        return text
 
     def _music(self, chat: dict, amsg: dict, request: str, emit) -> None:
         job = self.music.submit(request)

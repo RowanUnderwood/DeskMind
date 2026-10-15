@@ -531,6 +531,7 @@ class MindServer:
         log.info("MindServer %s listening on %s:%s", VERSION, cfg["host"], cfg["port"])
 
     def stop(self):
+        self.chat.search.close()
         if self.httpd:
             self.httpd.shutdown()
             self.httpd.server_close()
