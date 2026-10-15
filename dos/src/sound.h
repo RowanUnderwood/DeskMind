@@ -15,6 +15,7 @@ struct SndNote {
 extern int snd_enabled;      // user setting; snd_play() does nothing if 0
 extern int snd_mode;         // SNDTEST only: 0 = old writes, 1 = paced, 2 = paced + refresh (default)
 
+extern int snd_speaker;      // 1 before snd_init: the PC speaker even on a Tandy (/SPEAKER)
 void snd_init( void );
 void snd_done( void );       // must be called before exit (unhooks INT 1Ch)
 void snd_play( const SndNote *seq );

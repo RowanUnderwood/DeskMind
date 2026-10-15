@@ -251,7 +251,7 @@ def test_music_spec_and_store():
     from mindserver.music import MusicStore, clean_spec, guess_style
     s = clean_spec({"style": "Dungeon", "key": "d minor", "tempo": "500", "energy": "LOW", "drums": "lots",
                     "length": "long", "title": "The \"Crypt\"", "extra": "dropped", "seed": "7"})
-    assert s["style"] == "dungeon" and s["key"] == "D" and s["tempo"] == 180 and s["energy"] == "low"
+    assert s["style"] == "dungeon" and s["key"] == "D" and s["tempo"] == 200 and s["energy"] == "low"
     assert "drums" not in s and s["length"] == "long" and "extra" not in s and s["seed"] == 7, s
     assert clean_spec({"key": "Bb"})["key"] == "Bb" and clean_spec({"key": "f#"})["key"] == "F#"
     assert clean_spec({}, "a spooky cave theme")["style"] == "dungeon"
@@ -265,6 +265,19 @@ def test_music_spec_and_store():
         assert st.meta(a)["title"] == "Renamed song"
         st.delete(b)
         assert not st.exists(b) and [m["id"] for m in st.list()] == [a]
+        # Revisions: the new one keeps the project, the old one leaves the list (head false) but stays
+        assert st.meta(a)["project"] == a and st.meta(a)["rev"] == 1 and st.arrangement(a) is None
+        c = st.add(b"T3P1cccc", b"MThd", b"RIFF", {"title": "One", "project": a, "rev": 2, "parent": a},
+                   {"voices": [[], [], []]})
+        st.update(a, head=False)
+        assert [m["id"] for m in st.list()] == [c] and len(st.list(heads_only=False)) == 2
+        assert st.arrangement(c) == {"voices": [[], [], []]} and st.meta(c)["project"] == a
+        st.delete(c)
+        assert not os.path.exists(st.path(c, "arr.json"))
+    assert guess_style("a slow blues please", ("cracktro", "blues")) == "blues"
+    j = clean_spec({"style": "jazz", "length": "epic", "sketch": 1}, "", ("jazz",))
+    assert j["style"] == "jazz" and j["length"] == "epic" and j["sketch"] is True, j
+    assert clean_spec({"style": "jazz"}, "", ("cracktro",))["style"] == "cracktro"     # not offered: a guess
     print("music spec and store ok")
 
 

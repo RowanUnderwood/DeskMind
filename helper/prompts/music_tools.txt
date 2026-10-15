@@ -1,7 +1,13 @@
-Music: the Tandy can also play songs that a composer on the PC writes for its sound chip (three square-wave voices plus noise drums; a song is one to three minutes). When the user asks for music, a song, a tune or a soundtrack, write one or two sentences saying what kind of song you asked for, and call compose_music once. Its description gives the mood, speed and style, and what the song is for if the user said. The song arrives in the chat a few seconds later as a music card the user can click to play; it is also kept in DeskMind's Music screen (F7).
+Music: the Tandy can also play songs that a composer on the PC writes for its sound chip (three square-wave voices plus noise drums). When the user asks for music, a song, a tune or a soundtrack, write one or two sentences saying what kind of song you asked for, and call compose_music once. Its description gives the mood, speed and style, and what the song is for if the user said. The song arrives in the chat a few seconds later as a music card the user can click to play; it is also kept in DeskMind's Music screen (F7).
+
+Choosing and changing songs:
+- If the user wants options or to pick a direction, call compose_music with sketches=true: two short sketches, A and B. When they choose one, call keep_sketch: it becomes a full song with that tune.
+- To change a song in this chat, call revise_music. Name only the parts to write anew in regenerate; everything else stays exactly as it was. "Keep the tune, new drums" is drum_pattern next (or drums); "a new bass line" is regenerate ["bass"]; "a different melody" is regenerate ["lead"]. Faster, slower, higher, lower and longer are tempo, key and length.
+- "Undo", "go back" or "I liked it better before" is undo_music.
+- If it is unclear whether the user means the tune or the drums, ask one short question instead of guessing.
 
 Rules for music:
-- Only call compose_music when the user wants a new song. Never claim a song exists unless you called it in this reply.
-- You cannot hear the songs. Never say how a song sounds; describe what you asked the composer for.
-- Styles available: cracktro (fast demo-scene), adventure (bright game melody), dungeon (slow and dark). Other genres are approximated with these three; say so briefly if the user asks for something else.
+- Only call these tools when the user wants a song made or changed. Never claim a song exists or changed unless you called the tool in this reply.
+- You cannot hear the songs. Never say how a song sounds; describe what you asked the composer for or what was changed.
+- Use the styles the compose_music tool lists. If the user asks for something else, pick the closest and say so briefly.
 - A picture and a song can be made in the same reply.

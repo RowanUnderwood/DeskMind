@@ -22,9 +22,11 @@
 #define WIN_Y  SCR_Y
 #define WIN_H  ( SCR_H - 1 )
 
-static Widget s_ws[10];
-static Form s_form;
-enum { ID_LIST = 100, ID_PLAY, ID_LOOP, ID_RANDOM, ID_STOP, ID_RENAME, ID_DELETE, ID_SYNC, ID_COMPOSE };
+#define NWS 13                                // list + 8 buttons + 4 revision buttons
+static Widget s_ws[16];                      // room to spare: an array shorter than its controls once
+static Form s_form;                          // corrupted the Settings dialog
+enum { ID_LIST = 100, ID_PLAY, ID_LOOP, ID_RANDOM, ID_STOP, ID_RENAME, ID_DELETE, ID_SYNC, ID_COMPOSE,
+       ID_REVISE, ID_UNDO, ID_TRYTWO, ID_KEEP };
 static char s_note[120] = "";
 static unsigned s_shownSec = 0xFFFF;         // what the "now playing" panel shows (redrawn when it changes)
 static int s_shownMode = -1;
@@ -73,7 +75,12 @@ static void draw_panel( void ) {
     else if ( mode == JB_RANDOM ) how = "Random songs";
     ui_text_fit( PX, PY + 44, 164, how, DGRAY, WHITE );
   }
-  if ( !music_available( ) ) vid_text( PX, PY + 58, "Needs the Tandy sound chip", RED, WHITE );
+  if ( music_output( ) == MUSIC_SPEAKER ) vid_text( PX, PY + 58, "On the PC speaker", DGRAY, WHITE );
+  if ( music_streaming( ) && music_underruns( ) ) {
+    char u[40];
+    sprintf( u, "Waited for the disk %u times", music_underruns( ) );
+    ui_text_fit( PX, PY + 58, 164, u, RED, WHITE );
+  }
   gui_mouse_show( );
   s_shownSec = music_position( );
   s_shownMode = mode;
@@ -173,6 +180,7 @@ int music_download( const char *id, const char *title, unsigned long when ) {
   snd_settle( );
   long n = http_get_file( cfg.server, cfg.port, path, tmp, dl_progress, &st );
   if ( n < 0 || st != 200 || music_probe( tmp, 0 ) != MUS_OK ) { remove( tmp ); return 1; }
+  music_release( file );                         // a song streaming from this file stops before it goes
   remove( file );
   if ( rename( tmp, file ) ) { remove( tmp ); return 1; }
   jb_add( id, title, when );
@@ -240,6 +248,199 @@ void music_sync( void ) {
   music_draw( );
 }
 
+// ---------------------------------------------------------------- revisions (MindServer jobs)
+
+// After a job: download the new songs, delete the ones they replace, select and play the first new one
+static void apply_job( char ids[][9], char titles[][40], int n, char repl[][9], int nr ) {
+  int got = 0;
+  for ( int k = 0; k < n; k++ ) {
+    if ( music_have( ids[k] ) ) { got++; continue; }
+    char msg[70];
+    sprintf( msg, "Downloading %.40s", titles[k] );
+    busy_text( msg );
+    if ( music_download( ids[k], titles[k], 0 ) == 0 ) got++;
+  }
+  for ( int r = 0; r < nr; r++ ) {
+    int keep = 0;
+    for ( int k = 0; k < n; k++ ) if ( str_ieq( ids[k], repl[r] ) ) keep = 1;
+    int i = jb_find( repl[r] );
+    if ( !keep && i >= 0 ) jb_delete( i );
+  }
+  music_rescan( );
+  int i = n ? jb_find( ids[0] ) : -1;
+  if ( i >= 0 ) {
+    s_ws[0].sel = i;
+    jb_play( i, JB_ONCE );
+  }
+  if ( got < n ) note( "Some songs could not be downloaded: %s.  Sync tries again.", net_error( ) );
+  else if ( n > 1 ) note( "Two sketches: \"%s\" and \"%s\".  Play both, then Keep the one you like.", titles[0], titles[1] );
+  else if ( n ) note( "Now: \"%s\".  Undo brings back the version before.", titles[0] );
+}
+
+// POST path (JSON body or none) -> "J <n>", then GET /music/job/<n>?wait=1 for the result:
+// M <id> <title> per new song and R <id> per song it replaces.  0 = it worked.
+static int run_job( const char *path, const char *body, const char *what ) {
+  if ( !app_need_net( what ) ) return 1;
+  static char line[ 120 ];
+  static char ids[3][9], titles[3][40], repl[4][9];
+  int n = 0, nr = 0, job = 0, st = NET_ERROR, cancelled = 0;
+  char err[100] = "";
+  unsigned long save = net_timeout_ms;
+  net_timeout_ms = 20000;
+  busy_begin( what, "Asking MindServer..." );
+  if ( http_open( cfg.server, cfg.port, "POST", path, body, body ? (unsigned)strlen( body ) : 0,
+                  body ? "application/json" : 0 ) == 0 ) {
+    while ( ( st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { cancelled = 1; break; }
+    while ( !cancelled ) {
+      int rc = http_line( line, sizeof( line ) );
+      if ( rc == NET_AGAIN ) continue;
+      if ( rc == 1 && line[0] == 'J' ) job = atoi( line + 2 );
+      else if ( rc == 1 && line[0] == 'E' ) str_copy( err, line + 2, sizeof( err ) );
+      break;
+    }
+  }
+  http_close( );
+  if ( job > 0 ) {
+    char p[40];
+    sprintf( p, "/music/job/%d?wait=1", job );
+    busy_text( "Composing on the PC..." );
+    net_timeout_ms = 60000;                      // the job sends a line every 5 s while it works
+    if ( http_open( cfg.server, cfg.port, "GET", p, 0, 0, 0 ) == 0 ) {
+      while ( ( st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { cancelled = 1; break; }
+      while ( st == 200 && !cancelled ) {
+        int rc = http_line( line, sizeof( line ) );
+        if ( rc == NET_AGAIN ) { if ( kbd_get( ) == K_ESC ) cancelled = 1; continue; }
+        if ( rc != 1 || line[0] == 'D' ) break;
+        if ( line[0] == 'M' && n < 3 && strlen( line ) >= 10 ) {
+          str_copy( ids[n], line + 2, 9 );
+          str_copy( titles[n], strlen( line ) > 11 ? line + 11 : ids[n], 40 );
+          n++;
+        }
+        else if ( line[0] == 'R' && nr < 4 ) str_copy( repl[ nr++ ], line + 2, 9 );
+        else if ( line[0] == 'E' ) str_copy( err, line + 2, sizeof( err ) );
+      }
+    }
+    http_close( );                               // one socket: downloads only after this
+  }
+  net_timeout_ms = save;
+  if ( !cancelled && n ) apply_job( ids, titles, n, repl, nr );
+  busy_end( );
+  if ( cancelled ) { note( "Cancelled (MindServer may still finish it: Sync fetches it)." ); return 1; }
+  if ( !n ) {
+    msg_box( what, err[0] ? err : job > 0 ? net_error( ) : st > 0 ? "MindServer refused it (update MindServer)." : net_error( ), "OK" );
+    return 1;
+  }
+  return 0;
+}
+
+static const Song *selected( void ) {
+  const Song *s = jb_song( s_ws[0].sel );
+  if ( !s ) note( "Select a song first." );
+  return s;
+}
+
+static void do_revise( void ) {
+  const Song *s = selected( );
+  if ( !s ) return;
+  static const char *const drumT[] = { "Drums: as they are", "Drums: none", "Drums: light", "Drums: full",
+                                       "Drums: another pattern" };
+  static const char *const tempoT[] = { "Tempo: as it is", "Tempo: faster", "Tempo: slower" };
+  static const char *const keyT[] = { "Key: as it is", "Key: higher", "Key: lower" };
+  static const char *const lenT[] = { "Length: as it is", "Length: short", "Length: medium", "Length: long",
+                                      "Length: extended", "Length: epic" };
+  static const char *const lenN[] = { "", "short", "medium", "long", "extended", "epic" };
+#define MAXW 14
+  static Widget ws[ MAXW ];
+  memset( ws, 0, sizeof( ws ) );
+  int w = 380, h = 140, x = ( ( 640 - w ) / 2 ) & ~1, y = 24, n = 0;
+  int sel[4] = { 0, 0, 0, 0 }, cyc[4];
+  static const int counts[4] = { 5, 3, 3, 6 };
+  const char *const *texts[4] = { drumT, tempoT, keyT, lenT };
+  ws[n].type = W_LABEL; ws[n].x = 8; ws[n].y = 4; ws[n].w = 360; ws[n].h = 12;
+  ws[n].text = "Keep these parts note for note:"; n++;
+  int ck = n;
+  static const char *const parts[] = { "The tune (lead)", "The accompaniment", "The bass" };
+  for ( int k = 0; k < 3; k++ ) {
+    ws[n].type = W_CHECK; ws[n].x = 16; ws[n].y = 18 + 13 * k; ws[n].w = 340; ws[n].h = 10;
+    ws[n].text = parts[k]; ws[n].checked = 1; n++;
+  }
+  for ( int k = 0; k < 4; k++ ) {
+    cyc[k] = n;
+    ws[n].type = W_BUTTON; ws[n].id = 3 + k; ws[n].x = k % 2 ? 196 : 8; ws[n].y = 62 + 18 * ( k / 2 ); ws[n].w = 176;
+    ws[n].h = 14; ws[n].text = texts[k][0]; n++;
+  }
+  ws[n].type = W_LABEL; ws[n].x = 8; ws[n].y = 102; ws[n].w = 360; ws[n].h = 12;
+  ws[n].text = "Unticked parts get new notes."; n++;
+  ws[n].type = W_BUTTON; ws[n].id = 1; ws[n].x = w - 188; ws[n].y = 118; ws[n].w = 80; ws[n].h = 14;
+  ws[n].text = "Revise"; ws[n].flags = WF_DEFAULT; n++;
+  ws[n].type = W_BUTTON; ws[n].id = 2; ws[n].x = w - 100; ws[n].y = 118; ws[n].w = 80; ws[n].h = 14;
+  ws[n].text = "Cancel"; ws[n].flags = WF_CANCEL; n++;
+  if ( n > MAXW ) { msg_box( "Revise", "Internal error: too many controls.", "OK" ); return; }
+#undef MAXW
+  Form f;
+  unsigned char far *save = ui_save( x, y, w + 6, h + 3 );
+  form_init( &f, "Revise song", x, y, w, h, ws, n );
+  form_draw( &f );
+  int r;
+  while ( ( r = form_run( &f ) ) >= 3 && r <= 6 ) {      // the cycle buttons
+    int k = r - 3;
+    sel[k] = ( sel[k] + 1 ) % counts[k];
+    ws[ cyc[k] ].text = texts[k][ sel[k] ];
+    form_draw_widget( &f, cyc[k] );
+  }
+  ui_restore( x, y, w + 6, h + 3, save );
+  if ( r != 1 ) return;
+  static char body[200];
+  static const char *const partN[] = { "lead", "accompaniment", "bass" };
+  strcpy( body, "{\"regenerate\":[" );
+  int any = 0;
+  for ( int k = 0; k < 3; k++ ) if ( !ws[ ck + k ].checked ) {
+    sprintf( body + strlen( body ), "%s\"%s\"", any ? "," : "", partN[k] );
+    any = 1;
+  }
+  strcat( body, "]" );
+  static const char *const drumN[] = { "", "none", "light", "full" };
+  if ( sel[0] >= 1 && sel[0] <= 3 ) sprintf( body + strlen( body ), ",\"drums\":\"%s\"", drumN[ sel[0] ] );
+  if ( sel[0] == 4 ) strcat( body, ",\"drum_pattern\":\"next\"" );
+  if ( sel[1] ) sprintf( body + strlen( body ), ",\"tempo\":\"%s\"", sel[1] == 1 ? "faster" : "slower" );
+  if ( sel[2] ) sprintf( body + strlen( body ), ",\"key\":\"%s\"", sel[2] == 1 ? "up" : "down" );
+  if ( sel[3] ) sprintf( body + strlen( body ), ",\"length\":\"%s\"", lenN[ sel[3] ] );
+  strcat( body, "}" );
+  if ( !any && !sel[0] && !sel[1] && !sel[2] && !sel[3] ) { note( "Nothing to change: untick a part or pick a change." ); return; }
+  char path[40];
+  sprintf( path, "/music/%s/revise", s->file );
+  run_job( path, body, "Revise song" );
+}
+
+static void do_undo( void ) {
+  const Song *s = selected( );
+  if ( !s ) return;
+  char path[40];
+  sprintf( path, "/music/%s/undo", s->file );
+  run_job( path, 0, "Undo" );
+}
+
+static void do_trytwo( void ) {
+  const Song *s = selected( );
+  if ( !s ) return;
+  static char body[40];
+  sprintf( body, "{\"like\":\"%s\"}", s->file );
+  run_job( "/music/sketch", body, "Try two" );
+}
+
+static void do_keep( void ) {
+  const Song *s = selected( );
+  if ( !s ) return;
+  if ( strncmp( s->title, "Sketch ", 7 ) ) {
+    msg_box( "Keep", "Keep is for sketches: Try two makes two short sketches of a song, and Keep turns the "
+                     "one you like into a full song.", "OK" );
+    return;
+  }
+  char path[40];
+  sprintf( path, "/music/%s/build", s->file );
+  run_job( path, 0, "Keep sketch" );
+}
+
 // ---------------------------------------------------------------- screen API
 
 void music_init( void ) {
@@ -255,8 +456,16 @@ void music_init( void ) {
     Widget &w = s_ws[ k + 1 ];
     w.type = W_BUTTON; w.id = b[k].id; w.x = b[k].x; w.y = by; w.w = b[k].w; w.h = 14; w.text = b[k].t;
   }
+  // Revisions, under the "now playing" panel
+  static const struct { int id, x, y; const char *t; } r[] = {
+    { ID_REVISE, 452, 104, "Revise..." }, { ID_UNDO, 540, 104, "Undo" },
+    { ID_TRYTWO, 452, 122, "Try two" }, { ID_KEEP, 540, 122, "Keep" } };
+  for ( int k = 0; k < 4; k++ ) {
+    Widget &w = s_ws[ k + 9 ];
+    w.type = W_BUTTON; w.id = r[k].id; w.x = r[k].x; w.y = r[k].y; w.w = 84; w.h = 14; w.text = r[k].t;
+  }
   s_ws[1].flags = WF_DEFAULT;
-  form_init( &s_form, "Music", 0, WIN_Y, 640, WIN_H, s_ws, 9 );
+  form_init( &s_form, "Music", 0, WIN_Y, 640, WIN_H, s_ws, NWS );
   s_form.focus = 0;
   music_rescan( );
 }
@@ -273,6 +482,10 @@ int music_event( Event *e ) {
     case ID_DELETE:  do_delete( ); break;
     case ID_SYNC:    music_sync( ); return CMD_NONE;
     case ID_COMPOSE: music_compose_ask = 1; return CMD_GOTO_CHAT;
+    case ID_REVISE:  do_revise( ); break;
+    case ID_UNDO:    do_undo( ); break;
+    case ID_TRYTWO:  do_trytwo( ); break;
+    case ID_KEEP:    do_keep( ); break;
   }
   if ( id ) {
     music_draw( );

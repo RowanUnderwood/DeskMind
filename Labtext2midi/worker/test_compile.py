@@ -78,6 +78,22 @@ def main():
     data, rep, cuts = C.compile_fit(long)
     print('96 bars ->', rep['bytes'], 'bytes', cuts)
     assert rep['bytes'] <= t3.MAX_BYTES and cuts
+    # A long song (played from disk by DeskMind) and the speaker references, for MUSTEST
+    out = HERE.parent / 'out' / 'mustest'
+    out.mkdir(parents=True, exist_ok=True)
+    data, rep = C.compile_song(long, 'full', max_bytes=None)
+    assert rep['bytes'] > 32000, rep['bytes']
+    (out / 'LONG.T3').write_bytes(data)
+    (out / 'RASTER.T3').write_bytes(proven)
+    for name in ('LONG', 'RASTER'):
+        n = t3.write_speaker_ref(out / f'{name}.T3', out / f'{name}.SPK')
+        print(f'{name}.T3 {(out / f"{name}.T3").stat().st_size} bytes, {n} speaker sub-ticks')
+    # Swing and 3/4: positions move as recipes say, streams stay valid
+    assert C.swing_beat(4.5, 0.667) == 4.667 and C.swing_beat(4.0, 0.667) == 4.0 and C.swing_beat(4 + 1 / 3, 0.667) == 4 + 1 / 3
+    waltz = dict(arr, beats_per_bar=3, drum_pattern='waltz', swing=0.6,
+                 voices=[[(on * 0.75, ln * 0.75, p, v) for on, ln, p, v in vv] for vv in arr['voices']])
+    data, rep = C.compile_song(waltz, 'full')
+    assert rep['drum_hits'].get('kick') and rep['seconds'] < 77, rep
     print('compile tests passed')
 
 

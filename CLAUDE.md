@@ -322,6 +322,45 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     **`full` model not tested yet** (needs an NInfer restart; ask first).
   - DeskMind 0.9.3: only a status text "Searching the web: <query>" (older clients show "Qwen is thinking").
     On the card (backups `..._before/after-deskmind-093.img`). **User confirmed working on the real TL/3 (2026-10-15).**
+- **Music v2 (DeskMind 0.10.0, 2026-10-15; plan `~\.claude\plans\1-i-ve-noticed-through-curious-beacon.md`).**
+  Revisions, 18 candidate genres, songs up to ~8 min played from disk, PC-speaker playback.
+  - **Genres** (`Labtext2midi\worker`): `recipes.py` v2 (modes/7th chords via `chord()`, meter 3/4 and 6/8, swing,
+    `patterns.py` lead/accompaniment/bass patterns, drum `PATTERNS` in `compile.py`, GM `instruments`, `scalar` lead
+    scaffolds). The Yellow checkpoint has **no genre control** (no genre_groups); instruments are the one model lever
+    (they change 50-80% of lead notes for the same seed). v1 chord/scale results identical in all keys; v1 T3 output
+    identical for seeds 42/7 before novelty was enabled. `STYLES` = the v1 three until the quiz; `CANDIDATES` = all.
+  - **Lab** `genre_lab.py run|report` against a `--dev` worker on **port 8288** (same 3090): validity gates calibrated
+    on Raster Rush / Windowlight / v1 songs (stepwise >= 5%, not 25%), LOO nearest-centroid, instrument check,
+    report.html + quiz.html (blind, anonymous clips, results JSON to paste back). Findings: the pitch mask is NOT hard
+    (2-16% notes outside: `_repair` snaps them, folds out-of-range octaves); with `novelty_check` off MIDI-GPT often
+    returned the scaffold unchanged (748 times in pass 1): novelty on for every recipe, fallback without it.
+  - **Revisions**: worker `/revise` (`compose.revise`: regenerate lead/bass via `_infill` with the rest as context,
+    accompaniment pattern variants, drums/pattern, tempo, transpose, length/build; locked parts checked note for note;
+    v1 songs rebuilt from MIDI: cheap edits only). MindServer stores `<ID>.arr.json`; meta project/rev/parent/kind/
+    pair/change/head; `/music/list` = heads only (0.9.x DeskMind unaffected). Endpoints `/music/sketch` (JSON spec,
+    description or `{"like": id}`), `/music/<id>/revise|build|keep|undo|info`, `/music/<id>/wav?speaker=1`. Job results
+    stream `M <id> <title>` per new song + `R <id>` per replaced one (old clients ignore R). Chat tools compose_music
+    (+length, sketches), revise_music, keep_sketch, undo_music; songs resolved as latest/A/B, never IDs.
+    `music_live --worker http://127.0.0.1:8288` and a live Qwen chat run (sketches, keep B, drums, undo, new lead, epic,
+    speaker) pass.
+  - **Long songs**: `t3.MAX_TICKS` (16-bit ticks: 546 s); lengths extended (112 bars) / epic (208), capped at 520 s,
+    third theme C over B's chords, key change +2 at the end; streamed songs compile without the byte cap.
+    `music.cpp`: whole file <= 32,000 bytes (proven path), else a 16 KB ring refilled by `music_poll`; a dry ring
+    pauses (muted) and counts `music_underruns()`; `music_release(path)` before deleting/replacing a song file.
+  - **PC speaker**: `t3.speaker_schedule()` is the reference (240 Hz sub-ticks, lead 2 of 3, bass/acc take turns,
+    noise hits = LFSR clicks, count = divider*32/3); `music.cpp` follows it exactly. Tandy multiplexer bits 5-6 of 61h
+    are touched only on Tandy hardware (on an XT they are keyboard/parity controls). `/SPEAKER` (DESKMIND, SLIDES),
+    Settings "Use the PC speaker", `cfg.speaker`; sound effects move with it (`snd_speaker`).
+  - MUSTEST (`/STALL`, `/SPK ref.SPK`; refs by `python t3.py speaker`; test files from `test_compile.py` in
+    `Labtext2midi\out\mustest`): in-memory, streamed, starved (5 underruns, schedule intact), speaker in memory and
+    streamed: all PASS in DOSBox Tandy/286. music.obj: 0 `ss:` references (capstone).
+  - Music screen: Revise... / Undo / Try two / Keep (run_job: POST -> J -> wait stream; downloads after the stream
+    closes); chat handles R lines. 86Box SL/2: LONG.T3 (48 KB) streams in the Music screen; Revise dialog draws.
+  - Lab pass 3 (final recipes): all 21 genres valid in 5-6 of 6 sketches; lead-only recognition low for waltz (17%,
+    near lullaby), bossa 50%, adventure/cracktro/synthwave 67%. Blind quiz: `Labtext2midi\out\genre_lab\pass3\quiz\
+    quiz.html` (63 clips); results pending. Ship = add names to `recipes.STYLES`, then restart the worker.
+  - On the card 2026-10-15 (backups `..._before/after-deskmind-0100.img`): DESKMIND/SLIDES/README.TXT, MUSIC\LONGTEST.T3,
+    DMTEST\MUSTEST.EXE + LONG/RASTER .T3/.SPK. TESTING.md round 10 (MindServer + worker need a restart first).
 - **Missing chat pictures (2026-10-04, chat DF21D117 / picture C7B1069D).** The server had the picture; the Tandy's download after the
   reply failed and was ignored, leaving a grey thumbnail and "Could not show this picture". Cause of that one failure unknown (no log, possibly WiFi),
   but `net.cpp` chose local ports with an **unseeded `rand()`**, so every run reused the same port sequence; now `next_port()` starts at

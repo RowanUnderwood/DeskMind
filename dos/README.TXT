@@ -1,4 +1,4 @@
-DESKMIND 0.9.0 - AI chat, pictures and music for the Tandy 1000 TL/3 (and CGA)
+DESKMIND 0.10.0 - AI chat, pictures and music for the Tandy 1000 TL/3 (and CGA)
 ===========================================================================
 
 DeskMind talks over the PicoMEM WiFi to MindServer on the PC, which runs
@@ -16,6 +16,7 @@ STARTING
   First time: press F5 (Settings) and check the MindServer address/port.
   DESKMIND /NONET = start offline     DESKMIND /NOMOUSE = keyboard only
   DESKMIND /CGA   = CGA mode (below)  DESKMIND /NOEMS = slideshow not in EMS
+  DESKMIND /SPEAKER = music and sounds on the PC speaker (also in Settings)
 
 CGA MODE (DESKMIND /CGA, automatic on a PC without Tandy 1000 SL/TL video)
   For a plain 286 with a CGA card; on the Tandy it is a way to try it out.
@@ -25,7 +26,7 @@ CGA MODE (DESKMIND /CGA, automatic on a PC without Tandy 1000 SL/TL video)
   Thumbnails are black and white. CGA pictures live in PICSCGA\ (the
   Tandy pictures in PICS\ are left alone); Sync fetches CGA versions.
   Qwen knows it is talking to a 286 with CGA, and draws bolder pictures.
-  Sound comes from the PC speaker on a non-Tandy PC.
+  Sound and music come from the PC speaker on a non-Tandy PC.
 
 KEYS
   F2 Chat   F3 Create   F4 Gallery   F5 Settings   F6 Slideshow
@@ -41,7 +42,9 @@ CHAT (F2)
   Chats = reopen or delete saved chats.   New = fresh chat.
   Ask for music ("make a spooky tune for the dungeon pictures") and a song
   card arrives a few seconds later; it starts playing, click it to play or
-  stop it again. Styles: cracktro, adventure, dungeon.
+  stop it again. Styles: cracktro, adventure, dungeon. Also: "two sketches
+  of a song" (then "keep B"), "keep the tune but new drums", "a new bass
+  line", "faster", "a long song for the slideshow", "undo that".
   A chat holds about 40,000 characters. When it is full, Continue hides
   the older messages (they stay saved) and goes on.
 
@@ -64,6 +67,7 @@ SLIDESHOW (F6, or SLIDES from DOS - no network needed)
     /E  0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds, 5 interlace,
         6 dissolve, 7 box out, 8 box in, 9 slide in
     /R  random order       /CGA  CGA pictures (automatic on a non-Tandy PC)
+    /SPEAKER  music on the PC speaker
   Space/Right next, Left back, P pause, T titles, E try effects, Esc quit.
   Plays oldest first, newest last, then loops. "7/16" = the 7th-oldest.
   The picture buffer goes into EMS when there is some (else 63K DOS memory).
@@ -76,12 +80,18 @@ MUSIC (F7)
   Rename, Delete (Everywhere = on MindServer too). 150 songs at most.
   Settings (F5): "Music:" plays random songs, or the song you last played
   (looped), during slideshows.
+  Revise... = a new version: untick the parts that get new notes (tune,
+  accompaniment, bass), change drums, tempo, key or length. Undo = back to
+  the version before. Try two = two 8-bar sketches like this song; Keep on
+  a sketch makes it a full song (the other sketch goes).
+  Long songs (over 32K: "extended", "epic", up to about 8 minutes) play
+  from the disk. PC speaker: one voice, chords flicker, drums click.
 
 FILES
   DESKMIND.CFG   settings           PICS\*.TPI   pictures (about 68K each)
   CHATS\*.TCH    chat transcripts   SLIDES.EXE   stand-alone slideshow
   PICSCGA\*.TPI  CGA pictures (about 17K each)
-  MUSIC\*.T3     songs (up to 30K)   MUSIC\SONGS.LST  song titles
+  MUSIC\*.T3     songs              MUSIC\SONGS.LST  song titles
   MODEM.T3       the online startup sound
 
 TROUBLE?

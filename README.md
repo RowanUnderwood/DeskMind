@@ -174,17 +174,37 @@ something plays.
 | **Rename** / **Delete** | Change the title, or delete the song (**Everywhere** = on MindServer too) |
 | **Sync** | Download the songs MindServer has and this Tandy doesn't |
 | **Compose** | Go to Chat with "Compose a song:" typed in: describe it and press Enter |
+| **Revise...** | A new version of the selected song. Untick the parts that should get new notes (tune, accompaniment, bass); the ticked ones stay note for note. Drums, tempo, key and length change with the buttons in the dialog |
+| **Undo** | Back to the version before the last revision |
+| **Try two** | Two short sketches (8 bars) in the style, key and tempo of the selected song, with new tunes |
+| **Keep** | On a sketch: it becomes a full song with that tune; the other sketch goes |
 
 **What a song is:** three square-wave voices (a lead tune, an accompaniment and a bass line) plus noise drums (hi-hats,
 snare, and a short kick that borrows the bass voice for 42 ms). MIDI-GPT writes the tune and the bass over chords and
 patterns from a style recipe; the accompaniment, the form (intro, themes, break, ending), the drums and the final cadence
-are composed in code. Three styles: **cracktro** (fast demo-scene, 140-160 BPM, minor), **adventure** (bright game
-melody, 104-128 BPM, major) and **dungeon** (slow and dark, 72-96 BPM, minor). Songs are 1 to 3 minutes and at most
-30,000 bytes; they play from conventional memory while a song is on (the slideshow keeps EMS).
+are composed in code. Styles: **cracktro** (fast demo-scene, 140-160 BPM, minor), **adventure** (bright game
+melody, 104-128 BPM, major) and **dungeon** (slow and dark, 72-96 BPM, minor); more genres are being tested (see
+"New genres" below). Lengths: short (about a minute) to long (2-3 minutes), plus **extended** (about 4 minutes) and
+**epic** (5-8 minutes) with a third theme and a key change. A song up to 32,000 bytes plays from memory; a longer one
+plays **from the disk** through a 16 KB buffer that DeskMind tops up as it goes. If the disk can't keep up (a long
+wait somewhere), the song pauses instead of playing garbage; the Music screen then says how often it waited.
+
+**Revisions** work in Chat too: "two sketches of a jazz tune", "keep B", "keep the tune but new drums", "a new bass
+line", "faster", "undo that". Every version is its own song on MindServer; on the Tandy the new one replaces the old
+one (the R line in the reply), and Undo brings the old one back. Songs made before revisions can change drums, tempo
+and key only.
 
 The first song, **Raster Rush**, comes with DeskMind: the drum version that was checked on the real TL/3.
 
-Music needs the Tandy sound chip: on a CGA PC the Music screen says so (a Tandy in `/CGA` mode plays music).
+**PC speaker:** a PC without the Tandy chip plays the same songs on its speaker, and so does a Tandy with
+`DESKMIND /SPEAKER` (or Settings, "Use the PC speaker"; `SLIDES /SPEAKER` for the slideshow). The speaker has one voice:
+the tune plays two thirds of the time and the bass and chords take turns in the rest, about 240 times a second, so
+chords come out as a fast flicker, and the drums are clicks. MindServer's `/music/<id>/wav?speaker=1` is a preview.
+
+**New genres:** the composer has recipes for 18 more (blues, jazz, country, classical, waltz, techno, chiptune, rock,
+march, reggae, jig, ragtime, bossa nova, lullaby, synthwave, surf, space, puzzle). A genre ships only after the genre
+lab (`Labtext2midi\worker\genre_lab.py`: musical checks on sketches made by the real worker on the 3090) and a blind
+listening quiz show it is valid and recognisably itself; until then the composer offers the three above.
 
 ### Settings (F5)
 

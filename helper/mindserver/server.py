@@ -206,7 +206,7 @@ def h_chat(h: Handler):
     mode = _mode(h) if q.get("mode") else None
     h.start_stream()
     h.app.chat.reply(q.get("id"), text, (q.get("img") or "").upper() or None, h.stream_line,
-                     None if de is None else de == "1", mode, q.get("music") == "1")
+                     None if de is None else de == "1", mode, q.get("music") == "1", q.get("speaker") == "1")
 
 
 def h_chats(h: Handler):
@@ -390,16 +390,91 @@ def h_music_job(h: Handler, job_id: str):
         return
     h.start_stream()
     line = job.line()
-    h.stream_line(line)
+    if job.status != "done":
+        h.stream_line(line)
     deadline = time.time() + 10 * 60
     while job.status not in ("done", "error") and time.time() < deadline:
         new = h.app.music.wait_change(job, line, timeout=5.0)
         if new != line:
             line = new
-            h.stream_line(line)
-    if job.status not in ("done", "error"):
+            if job.status != "done":
+                h.stream_line(line)
+    if job.status == "done":
+        for ln in job.done_lines():                   # every new song (M), then what they replace (R)
+            h.stream_line(TX.to_cp437(ln))
+    elif job.status != "error":
         h.stream_line("E Timed out")
     h.stream_line("D")
+
+
+def _music_json(h: Handler, text: str | None = None) -> dict | None:
+    """The request body as a JSON object ({} if empty, None if not JSON).  Pass `text` when the body was
+    already read: it can be read only once."""
+    import json
+    text = (_text_body(h) if text is None else text).strip()
+    if not text:
+        return {}
+    try:
+        v = json.loads(text)
+        return v if isinstance(v, dict) else None
+    except ValueError:
+        return None
+
+
+def h_music_sketch(h: Handler):
+    """POST /music/sketch  body = a description, a JSON spec, or {"like": "<id>"} (style, key and tempo of that
+    song): two 8-bar sketches.  Answers 'J <job>'; the job ends with two M lines (Sketch A, Sketch B)."""
+    text = _text_body(h)
+    spec = _music_json(h, text) if text.lstrip().startswith("{") else None
+    request = text if spec is None else ""
+    if spec and spec.get("like"):                         # two new sketches like this song (DeskMind's Try two)
+        if not h.app.music.store.exists(str(spec["like"])):
+            h.send_text("E No such song\n", 404)
+            return
+        request, spec = h.app.music.like(str(spec["like"]))
+    job = h.app.music.submit_sketches(request, spec)
+    h.send_text(f"J {job.id}\n")
+
+
+def h_music_revise(h: Handler, id_: str):
+    """POST /music/<id>/revise  body = JSON {"regenerate": ["lead", "accompaniment", "bass"], "drums": none|light|full,
+    "drum_pattern": "next", "tempo": faster|slower|<bpm>, "key": up|down (or "transpose": n), "length"}.
+    Answers 'J <job>'; the job ends with 'M <new id> <title>' and 'R <old id>'."""
+    id_ = _music_id(h, id_)
+    if not id_:
+        return
+    args = _music_json(h)
+    if args is None:
+        h.send_text("E Bad JSON\n", 400)
+        return
+    edits = h.app.music.edits_from_args(id_, args)
+    if not edits:
+        h.send_text("E Nothing to change\n", 400)
+        return
+    h.send_text(f"J {h.app.music.submit_revise(id_, edits).id}\n")
+
+
+def h_music_build(h: Handler, id_: str):
+    """POST /music/<id>/build (or /keep) [body = a length]: keep this sketch, make it a full song; the
+    other sketch goes.  Answers 'J <job>'."""
+    id_ = _music_id(h, id_)
+    if id_:
+        h.send_text(f"J {h.app.music.submit_build(id_, _text_body(h).strip().lower()).id}\n")
+
+
+def h_music_undo(h: Handler, id_: str):
+    """POST /music/<id>/undo: back to the revision it was made from.  Answers 'J <job>'."""
+    id_ = _music_id(h, id_)
+    if id_:
+        h.send_text(f"J {h.app.music.submit_undo(id_).id}\n")
+
+
+def h_music_info(h: Handler, id_: str):
+    """GET /music/<id>/info: 'key value' lines (project, rev, parent, kind, pair, change, style, head, revisable)."""
+    id_ = _music_id(h, id_)
+    if id_:
+        info = h.app.music.info(id_)
+        h.send_text("".join(f"{k} {TX.to_cp437(str(v))}\n" for k, v in info.items()))
 
 
 def h_music_list(h: Handler):
@@ -428,11 +503,30 @@ def h_music_get(h: Handler, id_: str):
 
 
 def h_music_wav(h: Handler, id_: str):
-    """GET /music/<id>/wav: the preview, for listening on a PC."""
+    """GET /music/<id>/wav[?speaker=1]: the preview, for listening on a PC (speaker=1: as the PC speaker
+    plays it, made once with the worker's t3.py and kept as <id>.spk.wav)."""
     id_ = _music_id(h, id_)
-    if id_:
-        with open(h.app.music.store.path(id_, "wav"), "rb") as f:
-            h.send_bytes(f.read(), "audio/wav")
+    if not id_:
+        return
+    path = h.app.music.store.path(id_, "wav")
+    if h._query().get("speaker") == "1":
+        path = speaker_wav(h.app.music.store, id_)
+    with open(path, "rb") as f:
+        h.send_bytes(f.read(), "audio/wav")
+
+
+def speaker_wav(store, id_: str) -> str:
+    """The PC-speaker preview of a song (Labtext2midi/worker/t3.py render_speaker_wav, the same choices
+    DeskMind's player makes), made on first use."""
+    path = store.path(id_, "spk.wav")
+    if not os.path.exists(path):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "t3", os.path.join(PROJECT_DIR, "Labtext2midi", "worker", "t3.py"))
+        t3 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(t3)
+        t3.render_speaker_wav(store.t3(id_), path)
+    return path
 
 
 def h_music_title(h: Handler, id_: str):
@@ -471,6 +565,7 @@ ROUTES = {
     ("POST", "/enhance"): h_enhance,
     ("POST", "/music/gen"): h_music_gen,
     ("GET", "/music/list"): h_music_list,
+    ("POST", "/music/sketch"): h_music_sketch,
 }
 
 _ID = r"([0-9A-Fa-f]{8})"
@@ -490,6 +585,11 @@ PATTERN_ROUTES = [
     ("GET", re.compile(rf"/music/{_ID}/wav"), h_music_wav),
     ("POST", re.compile(rf"/music/{_ID}/title"), h_music_title),
     ("POST", re.compile(rf"/music/{_ID}/del"), h_music_del),
+    ("POST", re.compile(rf"/music/{_ID}/revise"), h_music_revise),
+    ("POST", re.compile(rf"/music/{_ID}/build"), h_music_build),
+    ("POST", re.compile(rf"/music/{_ID}/keep"), h_music_build),
+    ("POST", re.compile(rf"/music/{_ID}/undo"), h_music_undo),
+    ("GET", re.compile(rf"/music/{_ID}/info"), h_music_info),
     ("GET", re.compile(r"/prompt/(\w+)"), h_prompt_get),
     ("POST", re.compile(r"/prompt/(\w+)"), h_prompt_set),
 ]

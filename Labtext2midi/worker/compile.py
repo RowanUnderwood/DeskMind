@@ -10,6 +10,10 @@ An arrangement is a dict:
     sections: [{'name', 'start', 'bars', 'drums': 'normal' | 'sparse' | 'none'}],
     voices:   three lists of (onset_beats, length_beats, midi_pitch, velocity)  (lead, accompaniment, bass)
     drums:    'none' | 'light' | 'full';  hats: 'eighths' | 'quarters' | 'none';  gains: 3 floats
+optional (v2 recipes; the defaults give the original behaviour):
+    beats_per_bar: quarter beats in a bar (4; 3 for 3/4 and 6/8)
+    swing:        where an off-beat eighth falls (0.5 straight, 0.667 triplet swing)
+    drum_pattern: a PATTERNS key, or 'backbeat' (the Raster Rush drums above)
 """
 import math
 from collections import defaultdict
@@ -19,7 +23,59 @@ import t3
 MIN_PITCH = 45                      # A2: the chip's lowest tone is about 109 Hz
 BASS_MAX = 57                       # the bass voice stays low (export-tandy.py)
 KICK = ((0, 350, 2), (1, 245, 3), (2, 170, 5), (3, 125, 7), (4, 110, 10))   # tick, Hz, attenuation
-NOISE = {'snare': (4, 14, 1), 'hat': (9, 3, 0), 'open_hat': (8, 9, 0)}    # attenuation, length, rate
+NOISE = {'snare': (4, 14, 1), 'hat': (9, 3, 0), 'open_hat': (8, 9, 0),    # attenuation, length, rate
+         'rim': (7, 5, 1), 'ride': (10, 8, 0)}
+
+# Drum patterns for the v2 recipes: hits per bar as (beat, kind); 'sparse' is used for light drums
+# and sparse sections, 'alt' for odd bars (two-bar patterns), 'fill' before a section change.
+_E8 = [x * 0.5 for x in range(8)]
+PATTERNS = {
+    'none': {'normal': [], 'sparse': []},
+    'four_floor': {'normal': [(0, 'kick'), (1, 'kick'), (2, 'kick'), (3, 'kick'), (1, 'snare'), (3, 'snare'),
+                              (0.5, 'open_hat'), (1.5, 'open_hat'), (2.5, 'open_hat'), (3.5, 'open_hat')],
+                   'sparse': [(0, 'kick'), (1, 'kick'), (2, 'kick'), (3, 'kick'),
+                              (0.5, 'hat'), (1.5, 'hat'), (2.5, 'hat'), (3.5, 'hat')], 'fill': True},
+    'shuffle': {'normal': [(0, 'kick'), (2, 'kick'), (1, 'snare'), (3, 'snare')] +
+                          [(x, 'hat') for x in (0, 0.5, 1.5, 2, 2.5, 3.5)],
+                'sparse': [(0, 'kick'), (2, 'kick'), (1, 'hat'), (3, 'hat')], 'fill': True},
+    'jazz': {'normal': [(x, 'ride') for x in (0, 1, 1.5, 2, 3, 3.5)] + [(2.5, 'rim')],
+             'sparse': [(1, 'ride'), (3, 'ride')]},
+    'train': {'normal': [(0, 'kick'), (2, 'kick'), (1, 'snare'), (3, 'snare')] +
+                        [(x, 'hat') for x in (0.5, 1.5, 2.5, 3.5)],
+              'sparse': [(0, 'kick'), (2, 'kick'), (1, 'rim'), (3, 'rim')], 'fill': True},
+    'march': {'normal': [(0, 'kick'), (2, 'kick'), (1, 'snare'), (2.5, 'snare'), (3, 'snare'), (3.5, 'snare')],
+              'sparse': [(0, 'kick'), (2, 'kick'), (1, 'snare'), (3, 'snare')], 'fill': True},
+    'onedrop': {'normal': [(2, 'kick'), (2, 'rim')] + [(x, 'hat') for x in (0, 0.5, 1, 1.5, 2.5, 3, 3.5)],
+                'sparse': [(2, 'kick'), (2, 'rim')]},
+    'rock': {'normal': [(0, 'kick'), (2, 'kick'), (2.5, 'kick'), (1, 'snare'), (3, 'snare')] +
+                       [(x, 'hat') for x in (0, 0.5, 1.5, 2, 2.5, 3.5)],
+             'sparse': [(0, 'kick'), (2, 'kick'), (1, 'snare'), (3, 'snare')], 'fill': True},
+    'waltz': {'normal': [(0, 'kick'), (1, 'hat'), (2, 'hat')], 'sparse': [(0, 'kick')]},
+    'jig': {'normal': [(0, 'kick'), (1.5, 'kick'), (0.5, 'hat'), (1, 'hat'), (1.5, 'rim'), (2, 'hat'), (2.5, 'hat')],
+            'sparse': [(0, 'kick'), (1.5, 'kick')]},
+    'bossa': {'normal': [(0, 'kick'), (1.5, 'kick'), (2, 'kick'), (3.5, 'kick'), (0, 'rim'), (1.5, 'rim'), (3, 'rim')] +
+                        [(x, 'hat') for x in (0.5, 1, 2, 2.5)],
+              'alt': [(0, 'kick'), (1.5, 'kick'), (2, 'kick'), (3.5, 'kick'), (1, 'rim'), (2.5, 'rim')] +
+                     [(x, 'hat') for x in (0, 0.5, 1.5, 2, 3, 3.5)],
+              'sparse': [(0, 'kick'), (2, 'kick'), (1.5, 'rim'), (3, 'rim')]},
+    'halftime': {'normal': [(0, 'kick'), (2, 'snare'), (1, 'hat'), (3, 'hat')], 'sparse': [(0, 'kick'), (2, 'hat')]},
+}
+
+
+def swing_beat(x, swing):
+    """A position in beats with swung eighths: an off-beat eighth moves to `swing` of the beat, swung
+    sixteenths in proportion; on-beat and triplet positions stay where they are."""
+    if swing == 0.5:
+        return x
+    b = math.floor(x + 1e-9)
+    f = x - b
+    if abs(f - 0.5) < 0.03:
+        return b + swing
+    if abs(f - 0.25) < 0.03:
+        return b + swing / 2
+    if abs(f - 0.75) < 0.03:
+        return b + swing + (1 - swing) / 2
+    return x
 
 
 class Song:
@@ -27,9 +83,15 @@ class Song:
         self.arr = arr
         self.b = t3.Builder()
         self.sec_per_beat = 60.0 / arr['bpm']
+        self.bpb = arr.get('beats_per_bar', 4)
+        self.swing = arr.get('swing', 0.5)
 
     def tick(self, beats):
         return round(beats * self.sec_per_beat * self.b.rate)
+
+    def stick(self, beats):
+        """tick() of a swung position."""
+        return self.tick(swing_beat(beats, self.swing))
 
 
 def fold(pitch, ch):
@@ -54,10 +116,10 @@ def tone_events(song):
             hz = 440 * 2 ** ((p - 69) / 12)
             div = t3.divider(hz)
             stats['max_cents'] = max(stats['max_cents'], abs(1200 * math.log2(t3.tone_hz(div) / hz)))
-            start = song.tick(on)
-            end = max(start + 1, song.tick(on + length))
+            start = song.stick(on)
+            end = max(start + 1, song.stick(on + length))
             if i + 1 < len(notes):
-                end = min(end, song.tick(notes[i + 1][0]))      # one voice: the next note cuts this one
+                end = min(end, song.stick(notes[i + 1][0]))     # one voice: the next note cuts this one
             if end <= start:
                 continue                                         # collapsed onto the next onset
             att = max(0, min(14, round(-10 * math.log10(max(1, vel) / 127 * gains[ch]))))
@@ -77,6 +139,8 @@ def drum_hits(song, density):
     arr = song.arr
     if density == 'none':
         return []
+    if arr.get('drum_pattern', 'backbeat') != 'backbeat':
+        return pattern_hits(song, density)
     hats = arr.get('hats', 'eighths')
     light = density == 'light'
     hits = []
@@ -86,7 +150,7 @@ def drum_hits(song, density):
         for bar in range(s['start'], s['start'] + s['bars']):
             if mode == 'none' or bar < 2 or bar == arr['bars'] - 1:
                 continue
-            b0 = bar * 4
+            b0 = bar * song.bpb
             sparse = mode == 'sparse' or light
             snares = [3] if sparse else [1, 3]
             if bar in fill_bars and not light:
@@ -109,7 +173,33 @@ def drum_hits(song, density):
     return hits
 
 
-def compile_song(arr, density=None):
+def pattern_hits(song, density):
+    """drum_hits for a PATTERNS drum pattern (v2 recipes), on the song's own bar map and meter.
+    Like the original: no drums in the first two bars or the last one."""
+    arr = song.arr
+    pat = PATTERNS[arr['drum_pattern']]
+    bpb = song.bpb
+    light = density == 'light'
+    fill_bars = {s['start'] + s['bars'] - 1 for s in arr['sections'][:-1]}
+    hits = []
+    for s in arr['sections']:
+        mode = s.get('drums', 'normal')
+        for bar in range(s['start'], s['start'] + s['bars']):
+            if mode == 'none' or bar < 2 or bar == arr['bars'] - 1:
+                continue
+            if mode == 'sparse' or light:
+                bar_hits = pat['sparse']
+            else:
+                bar_hits = pat['alt'] if bar % 2 and 'alt' in pat else pat['normal']
+            bar_hits = [(x, k) for x, k in bar_hits if x < bpb]
+            if bar in fill_bars and pat.get('fill') and not light:
+                bar_hits = [(x, k) for x, k in bar_hits if x < bpb - 0.5 or k == 'kick'] + \
+                           [(bpb - 0.5, 'snare'), (bpb - 0.25, 'snare')]
+            hits += [(bar * bpb + x, k) for x, k in bar_hits]
+    return hits
+
+
+def compile_song(arr, density=None, max_bytes=t3.MAX_BYTES):
     """Returns (T3 bytes, report)."""
     song = Song(arr)
     density = density or arr.get('drums', 'full')
@@ -119,7 +209,7 @@ def compile_song(arr, density=None):
     noise_on = defaultdict(list)
     counts = defaultdict(int)
     for beat, kind in drum_hits(song, density):
-        t = song.tick(beat)
+        t = song.stick(beat)
         counts[kind] += 1
         if kind == 'kick':
             kick_start[t] = True
@@ -182,25 +272,26 @@ def compile_song(arr, density=None):
                 b.noise(t, white=True, rate=rate)
                 noise_ctl = 4 | rate
             b.raw(t, 0xF0 | att)
-    end = song.tick(arr['bars'] * 4)
+    end = song.tick(arr['bars'] * song.bpb)
     data = b.build(end)
-    report = t3.validate(data)
+    report = t3.validate(data, max_bytes)
     report.update({'notes_per_voice': stats['notes'], 'octave_folded': stats['folded'],
                    'max_pitch_error_cents': round(stats['max_cents'], 2), 'drums': density,
                    'drum_hits': dict(counts)})
     return data, report
 
 
-def compile_fit(arr):
-    """Compiles within t3.MAX_BYTES: drums thin out first (full -> light -> none), then the
-    song loses its middle sections.  Returns (data, report, notes about what was cut)."""
+def compile_fit(arr, max_bytes=t3.MAX_BYTES):
+    """Compiles within max_bytes (None: a streamed song, no size limit) and the tick limit: drums thin
+    out first (full -> light -> none), then the song loses its middle sections.  Returns (data, report,
+    notes about what was cut)."""
     cuts = []
     order = {'full': ['full', 'light', 'none'], 'light': ['light', 'none'], 'none': ['none']}[arr.get('drums', 'full')]
     while True:
         last_err = None
         for d in order:
             try:
-                data, rep = compile_song(arr, d)
+                data, rep = compile_song(arr, d, max_bytes)
                 if d != order[0]:
                     cuts.append(f'drums {order[0]} -> {d} to fit')
                 return data, rep, cuts
@@ -219,7 +310,8 @@ def drop_section(arr):
     secs = arr['sections']
     k = len(secs) - 2
     s = secs[k]
-    a, n = s['start'] * 4, s['bars'] * 4
+    bpb = arr.get('beats_per_bar', 4)
+    a, n = s['start'] * bpb, s['bars'] * bpb
     voices = [[(on - n if on >= a + n else on, ln, p, v) for on, ln, p, v in voice if not a <= on < a + n]
               for voice in arr['voices']]
     new_secs = []

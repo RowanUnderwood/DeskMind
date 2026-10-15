@@ -18,7 +18,8 @@ from collections import defaultdict
 PSG_CLOCK = 3_579_545
 PIT_CLOCK = 1_193_182
 PIT_DIV = 9943                       # 120.002 Hz, as the proven Raster Rush stream
-MAX_BYTES = 30_000                   # DeskMind's buffer is 32,000; keep a margin
+MAX_BYTES = 30_000                   # played from memory up to this (DeskMind's buffer is 32,000); longer songs stream
+MAX_TICKS = 65_534                   # ticks are 16 bits and FFFFh ends the stream: 546 s at 120 Hz
 MUTE = bytes((0x9F, 0xBF, 0xDF, 0xFF))
 
 # Noise control (register 6): bit 2 = white noise; bits 0-1 = rate (0 fastest .. 2 slowest,
@@ -76,6 +77,8 @@ class Builder:
     def build(self, end=None):
         """The stream; the final mute record goes at `end` (after any writes on that tick)."""
         end = max(self.end, end if end is not None else self.end)
+        if end > MAX_TICKS:
+            raise ValueError(f'{end} ticks, over the {MAX_TICKS}-tick limit')
         data = bytearray(b'T3P1' + struct.pack('<HH', self.pit_div, end))
         records = [(0, MUTE)] + [(t, bytes(self.w[t])) for t in sorted(self.w)] + [(end, MUTE)]
         for t, payload in records:
@@ -112,9 +115,10 @@ def read_stream(data):
 
 
 def validate(data, max_bytes=MAX_BYTES):
-    """Checks what the DOS player and the chip need.  Returns a small report dict."""
+    """Checks what the DOS player and the chip need.  Returns a small report dict.  max_bytes None: a song
+    DeskMind streams from disk (no size limit; the tick limit still holds)."""
     divisor, end, records = read_stream(data)
-    if len(data) > max_bytes:
+    if max_bytes is not None and len(data) > max_bytes:
         raise ValueError(f'{len(data)} bytes, over {max_bytes}')
     if records[0] != (0, MUTE):
         raise ValueError('Does not start with the mute record')
@@ -217,3 +221,126 @@ def render_wav(data, wav_path, sr=44100):
         w.setframerate(sr)
         w.writeframes(pcm.tobytes())
     return {'seconds': round(end * tick_seconds, 2), 'samples': len(pcm)}
+
+
+# ---------------------------------------------------------------- PC speaker
+#
+# DeskMind plays the same T3P1 stream on the PC speaker (one 1-bit voice, PIT channel 2) when there
+# is no Tandy chip or /SPEAKER is given.  music.cpp decodes the records into shadow registers and,
+# SPK_MULT times per stream tick, picks what the speaker plays.  speaker_schedule() is the reference
+# for that choice; DeskMind's player must follow it exactly (MUSTEST compares the two).
+#
+#   - a tone voice is audible while its attenuation is <= SPK_AUDIBLE (no volume on a speaker: the
+#     chip's decay envelope becomes a staccato cut)
+#   - lead (voice 0) audible: it plays on two of every three sub-ticks, the third goes round the other
+#     audible voices (bass first); no lead: the audible voices take turns
+#   - a noise hit (an attenuation write of SPK_DRUM or less to the noise channel) takes 2 sub-ticks
+#     (snare: attenuation <= 5) or 1 (hats) of pseudo-random high pitches
+#   - PIT count = chip divider * 32 / 3 (both clocks come from the same 14.318 MHz crystal)
+
+SPK_MULT = 2
+SPK_AUDIBLE = 12
+SPK_DRUM = 9
+SPK_ORDER = (2, 1)                    # who shares the third sub-tick with the lead: bass, then accompaniment
+
+
+def speaker_count(div):
+    return (div * 32) // 3
+
+
+def speaker_schedule(data, mult=SPK_MULT):
+    """PIT channel 2 counts per sub-tick (0 = speaker off): ((divisor, end), [count, ...])."""
+    divisor, end, records = read_stream(data)
+    divs = [1023] * 3
+    atts = [15] * 4
+    latch = 0
+    lfsr = 0xACE1
+    drum = 0
+    out = []
+    ri = 0
+    n = 0
+    for tick in range(end + 1):
+        hit = 0
+        while ri < len(records) and records[ri][0] == tick:
+            for b in records[ri][1]:
+                if b & 0x80:
+                    latch = (b >> 4) & 7
+                    if latch & 1:
+                        atts[latch >> 1] = b & 15
+                        if latch == 7 and (b & 15) <= SPK_DRUM:
+                            hit = max(hit, 2 if (b & 15) <= 5 else 1)
+                    elif latch < 6:
+                        divs[latch >> 1] = (divs[latch >> 1] & 0x3F0) | (b & 15)
+                else:
+                    if latch < 6 and not latch & 1:
+                        divs[latch >> 1] = max(1, (divs[latch >> 1] & 15) | ((b & 63) << 4))
+            ri += 1
+        if hit:
+            drum = hit
+        for _ in range(mult):
+            if drum:
+                drum -= 1
+                lfsr = (lfsr >> 1) ^ (0xB400 if lfsr & 1 else 0)
+                out.append(150 + (lfsr & 511))
+            else:
+                others = [c for c in SPK_ORDER if atts[c] <= SPK_AUDIBLE]
+                if atts[0] <= SPK_AUDIBLE:
+                    ch = others[(n // 3) % len(others)] if others and n % 3 == 2 else 0
+                elif others:
+                    ch = others[n % len(others)]
+                else:
+                    ch = -1
+                out.append(speaker_count(divs[ch]) if ch >= 0 else 0)
+            n += 1
+    return (divisor, end), out
+
+
+def render_speaker_wav(data, wav_path, sr=44100, mult=SPK_MULT):
+    """Preview of the PC-speaker version: a band-limited 1-bit square at each sub-tick's pitch."""
+    import numpy as np
+    import wave
+    (divisor, end), counts = speaker_schedule(data, mult)
+    sub = divisor / PIT_CLOCK / mult
+    audio = np.zeros(round(len(counts) * sub * sr), dtype=np.float64)
+    phase = 0.0
+    prev = 0
+    for k, c in enumerate(counts):
+        stop = min(len(audio), round((k + 1) * sub * sr))
+        size = stop - prev
+        if size > 0 and c:
+            f = PIT_CLOCK / c
+            t = np.arange(size) / sr
+            ph = np.mod(phase + f * t, 1)
+            sq = np.where(ph < 0.5, 1.0, -1.0)
+            if f < sr / 2:
+                sq += _blep(np, ph, f / sr) - _blep(np, np.mod(ph - 0.5, 1), f / sr)
+            audio[prev:stop] = sq * 0.5
+            phase = (phase + size * f / sr) % 1
+        prev = max(prev, stop)
+    audio -= np.mean(audio)
+    pcm = np.round(np.clip(audio, -1, 1) * 32767 * 0.8).astype('<i2')
+    with wave.open(str(wav_path), 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+    return {'seconds': round(len(counts) * sub, 2), 'samples': len(pcm)}
+
+
+def write_speaker_ref(t3_path, spk_path, mult=SPK_MULT):
+    """The speaker schedule as u16 counts (DeskMind's MUSTEST /SPK compares against it)."""
+    import struct as _s
+    from pathlib import Path as _P
+    _, counts = speaker_schedule(_P(t3_path).read_bytes(), mult)
+    _P(spk_path).write_bytes(b''.join(_s.pack('<H', c) for c in counts))
+    return len(counts)
+
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) >= 4 and sys.argv[1] == 'speaker':
+        print(write_speaker_ref(sys.argv[2], sys.argv[3]), 'sub-ticks')
+    elif len(sys.argv) >= 4 and sys.argv[1] == 'speaker-wav':
+        print(render_speaker_wav(open(sys.argv[2], 'rb').read(), sys.argv[3]))
+    else:
+        print('python t3.py speaker song.T3 song.SPK   |   python t3.py speaker-wav song.T3 out.wav')

@@ -218,6 +218,7 @@ int jb_delete( int i ) {
   if ( str_ieq( s_s[i].file, s_cur ) ) jb_stop( );
   char path[80];
   jb_path( path, s_s[i].file );
+  music_release( path );                           // also when it plays as a jingle or from SLIDES
   if ( remove( path ) ) return 1;
   memmove( &s_s[i], &s_s[i+1], sizeof( Song ) * ( s_n - i - 1 ) );
   s_n--;

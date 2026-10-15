@@ -7,6 +7,7 @@
 
 #include "cfg.h"
 #include "sys.h"
+#include "video.h"
 
 DmConfig cfg;
 
@@ -28,6 +29,8 @@ void cfg_defaults( const char *exeDir ) {
 }
 
 int cfg_cga = 0;
+int cfg_speaker_forced = 0;
+int cfg_speaker( void ) { return cfg.speaker || cfg_speaker_forced || vid_detect( ) == VT_OTHER; }
 
 const char *cfg_pics( void ) { return cfg_cga ? cfg.pics_cga : cfg.pics; }
 const char *cfg_pics_other( void ) { return cfg_cga ? cfg.pics : cfg.pics_cga; }
@@ -72,6 +75,7 @@ int cfg_load( const char *path ) {
     else if ( str_ieq( key, "music" ) )        str_copy( cfg.music, val, sizeof( cfg.music ) );
     else if ( str_ieq( key, "slide_music" ) )  cfg.slide_music = n >= 0 && n <= 2 ? n : 0;
     else if ( str_ieq( key, "slide_song" ) )   str_copy( cfg.slide_song, val, sizeof( cfg.slide_song ) );
+    else if ( str_ieq( key, "speaker" ) )      cfg.speaker = n != 0;
   }
   fclose( f );
   return 0;
@@ -86,7 +90,8 @@ int cfg_save( const char *path ) {
            cfg.sound, cfg.mode, cfg.enhance, cfg.review, cfg.draw_enhance );
   fprintf( f, "slide_delay=%d\nslide_effect=%d\nslide_shuffle=%d\npics=%s\npics_cga=%s\nchats=%s\n",
            cfg.slide_delay, cfg.slide_effect, cfg.slide_shuffle, cfg.pics, cfg.pics_cga, cfg.chats );
-  fprintf( f, "music=%s\nslide_music=%d\nslide_song=%s\n", cfg.music, cfg.slide_music, cfg.slide_song );
+  fprintf( f, "music=%s\nslide_music=%d\nslide_song=%s\nspeaker=%d\n", cfg.music, cfg.slide_music, cfg.slide_song,
+           cfg.speaker );
   int bad = ferror( f );
   fclose( f );
   return bad;

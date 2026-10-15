@@ -801,6 +801,7 @@ static void send_message( void ) {
   if ( s_attach[0] ) sprintf( path + strlen( path ), "&img=%s", s_attach );
   if ( cfg.draw_enhance >= 0 ) sprintf( path + strlen( path ), "&draw_enhance=%d", cfg.draw_enhance ? 1 : 0 );
   if ( music_available( ) ) strcat( path, "&music=1" );    // Qwen may then compose songs (M lines)
+  if ( music_output( ) == MUSIC_SPEAKER ) strcat( path, "&speaker=1" );   // ... heard on the one-voice speaker
   if ( cfg_cga ) strcat( path, "&mode=cga" );              // CGA prompts, pictures drawn for CGA
   static char body[ 400 ];
   str_copy( body, s_input, sizeof( body ) );
@@ -813,8 +814,8 @@ static void send_message( void ) {
   int rc = http_open( cfg.server, cfg.port, "POST", path, body, (unsigned)strlen( body ), "text/plain" );
   int aiMsg = -1, done = 0, replied = 0, cancelled = 0;
   static char pending[4][9];
-  static char songs[2][9], songTitle[2][40];
-  int nsongs = 0;
+  static char songs[3][9], songTitle[3][40], repl[4][9];
+  int nsongs = 0, nrepl = 0;
   int npending = 0;
   static char line[ 1100 ];
   // No pointer while the reply streams in (it can't be used then anyway), so no drawing
@@ -892,7 +893,7 @@ static void send_message( void ) {
       char sid[9];
       str_copy( sid, arg, sizeof( sid ) );
       const char *title = strlen( arg ) > 9 ? arg + 9 : "";
-      if ( nsongs < 2 ) { str_copy( songs[ nsongs ], sid, 9 ); str_copy( songTitle[ nsongs ], title, 40 ); nsongs++; }
+      if ( nsongs < 3 ) { str_copy( songs[ nsongs ], sid, 9 ); str_copy( songTitle[ nsongs ], title, 40 ); nsongs++; }
       int wasBottom = ( s_top == max_top( ) );
       int sm = add_msg( MK_MUSIC, title, sid );
       layout_from( sm );
@@ -904,6 +905,10 @@ static void send_message( void ) {
       layout_from( em );
       refresh_from( s_msgs[em].firstLine, 1 );
       snd_play( SND_ERROR );
+    }
+    else if ( code == 'R' ) {
+      // A revision replaced this song (or a kept sketch replaced its pair): deleted here after the downloads
+      if ( nrepl < 4 ) str_copy( repl[ nrepl++ ], arg, 9 );
     }
     else if ( code == 'D' ) done = 1;
   }
@@ -941,9 +946,13 @@ static void send_message( void ) {
       snd_play( SND_ERROR );
     }
   }
-  if ( gotSong ) {
+  for ( int r = 0; r < nrepl; r++ ) {
+    int i = jb_find( repl[r] );
+    if ( i >= 0 ) jb_delete( i );                  // stops it first if it is the song playing
+  }
+  if ( gotSong || nrepl ) {
     music_rescan( );
-    int i = jb_find( songs[0] );
+    int i = nsongs ? jb_find( songs[0] ) : -1;    // (songs[] is static: only this reply's count)
     if ( i >= 0 && jb_play( i, JB_ONCE ) == MUS_OK ) app_menu_status( );
   }
   if ( nsongs ) draw_panel( );

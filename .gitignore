@@ -51,6 +51,7 @@ Labtext2midi/MidiPlayer6/
 Labtext2midi/*.txt
 Labtext2midi/worker/*.wav
 Labtext2midi/worker/__pycache__/
+Labtext2midi/out/
 
 # Web search MCP server (helper\mcp: npm ci)
 helper/mcp/node_modules/

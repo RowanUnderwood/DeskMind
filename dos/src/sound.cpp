@@ -173,10 +173,13 @@ static void __interrupt __far tick_handler( void ) {
   _chain_intr( s_oldTick );
 }
 
+int snd_speaker = 0;
+
 void snd_init( void ) {
-  s_spk = vid_detect( ) == VT_OTHER;
+  s_spk = snd_speaker || vid_detect( ) == VT_OTHER;
   s_old61 = inp( 0x61 );
   if ( !s_spk ) outp( 0x61, s_old61 | 0x60 );   // route the 3-voice chip to the speaker (Tandy multiplexer bits)
+  else if ( vid_detect( ) != VT_OTHER ) outp( 0x61, s_old61 & ~0x63 );   // Tandy, /SPEAKER: the timer instead
   v_silence( );
   if ( !s_oldTick ) {
     s_oldTick = _dos_getvect( 0x1C );
@@ -191,7 +194,7 @@ void snd_done( void ) {
     _dos_setvect( 0x1C, s_oldTick );
     s_oldTick = 0;
   }
-  outp( 0x61, s_old61 & ~3 );               // speaker gate off either way
+  outp( 0x61, s_old61 & ~3 );               // speaker gate off either way (and the multiplexer as it was)
 }
 
 void snd_play( const SndNote *seq ) {

@@ -1,9 +1,10 @@
 // DeskMind - generative AI for the Tandy 1000 TL/3 (and CGA PCs).
 //
-//   DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS]   (/NOEMS: slideshow picture buffer not in EMS)
+//   DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS] [/SPEAKER]   (/NOEMS: slideshow picture buffer not in EMS)
 //
 // /CGA forces CGA mode (640x200 black and white, CGA pictures in PICSCGA); any PC
-// without Tandy video uses it anyway.
+// without Tandy video uses it anyway.  /SPEAKER plays music and sound effects on the PC speaker
+// (one voice) even on a Tandy; a PC without the Tandy chip always does.
 //
 // Chat with Qwen, create pictures with Krea 2, browse them in a gallery.
 // All the heavy work is done by MindServer on the PC (see helper\).
@@ -120,7 +121,7 @@ static void sound_check( void ) {
     struct dostime_t t;
     _dos_getdate( &d );
     _dos_gettime( &t );
-    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.9.3 ===\n",
+    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.10.0 ===\n",
              s_f9Step, d.year, d.month, d.day, t.hour, t.minute, t.second );
     snd_diag( f );
     fclose( f );
@@ -164,8 +165,9 @@ int main( int argc, char *argv[] ) {
     else if ( str_ieq( argv[i], "/NOMOUSE" ) ) noMouse = 1;
     else if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
     else if ( str_ieq( argv[i], "/NOEMS" ) ) slide_no_ems = 1;
+    else if ( str_ieq( argv[i], "/SPEAKER" ) ) cfg_speaker_forced = 1;
     else if ( argv[i][0] == '/' || argv[i][0] == '?' ) {
-      printf( "DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS]\n" );
+      printf( "DESKMIND [/NONET] [/NOMOUSE] [/CGA] [/NOEMS] [/SPEAKER]\n" );
       return 0;
     }
   }
@@ -185,7 +187,7 @@ int main( int argc, char *argv[] ) {
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( cfg_cga ? "DeskMind 0.9.3 (CGA)\n" : "DeskMind 0.9.3\n" );
+  printf( cfg_cga ? "DeskMind 0.10.0 (CGA)\n" : "DeskMind 0.10.0\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );
@@ -210,8 +212,10 @@ int main( int argc, char *argv[] ) {
     if ( app_net ) net_done( );
     return 1;
   }
+  snd_speaker = cfg_speaker( );
+  music_set_output( snd_speaker ? MUSIC_SPEAKER : MUSIC_CHIP );
   snd_init( );
-  music_owner_hook = snd_music;           // songs take the chip: sound effects step aside
+  music_owner_hook = snd_music;           // songs take the chip (or speaker): sound effects step aside
   vid_open( gmode );
   if ( !noMouse ) gui_init( );
   gui_idle = idle;

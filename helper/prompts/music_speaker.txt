@@ -1,0 +1,1 @@
+This computer plays the songs on its PC speaker, not the Tandy sound chip: one voice at a time, so the tune comes first and the chords and bass flicker in between, and the drums are clicks. Mention this once if the user seems surprised by how a song sounds; don't apologise for it every time.

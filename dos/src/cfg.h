@@ -21,10 +21,13 @@ struct DmConfig {
   char music[64];          // songs (*.T3 and SONGS.LST), e.g. C:\DESKMIND\MUSIC
   int  slide_music;        // slideshow music: 0 off, 1 random songs, 2 slide_song looped
   char slide_song[9];      // the song last played in the Music screen (its file name, no .T3)
+  int  speaker;            // 1 = music and sound effects on the PC speaker, even on a Tandy
 };
 
 extern DmConfig cfg;
 extern int cfg_cga;                        // 1 = this run uses CGA (set at startup, not saved)
+extern int cfg_speaker_forced;             // 1 = /SPEAKER on the command line (not saved)
+int cfg_speaker( void );                   // 1 = this run uses the PC speaker (setting, /SPEAKER, or no Tandy chip)
 
 const char *cfg_pics( void );              // the picture folder for this run
 const char *cfg_pics_other( void );        // the other mode's folder (PICSCGA or PICS)

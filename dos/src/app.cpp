@@ -210,7 +210,7 @@ void app_menu_status( void ) {
 // ---------------------------------------------------------------- settings
 
 void app_settings( void ) {
-  // 16 controls today.  The array once had fewer slots than controls: the extra one was
+  // 17 controls today.  The array once had fewer slots than controls: the extra one was
   // written over the port/seconds/effect buffers (smileys on screen, Cancel dead).
 #define MAXW 20
   static Widget ws[ MAXW ];
@@ -232,8 +232,11 @@ void app_settings( void ) {
   ws[n].type = W_EDIT; ws[n].x = 160; ws[n].y = 35; ws[n].w = 200; ws[n].h = 13;
   ws[n].buf = cfg.token; ws[n].size = sizeof( cfg.token ); ws[n].cur = (unsigned)strlen( cfg.token ); n++;
   int ck = n;
-  ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 54; ws[n].w = 420; ws[n].h = 10;
+  ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 54; ws[n].w = 212; ws[n].h = 10;
   ws[n].text = "Sound effects"; ws[n].checked = cfg.sound; n++;
+  int spw = n;
+  ws[n].type = W_CHECK; ws[n].x = 228; ws[n].y = 54; ws[n].w = 212; ws[n].h = 10;
+  ws[n].text = "Use the PC speaker"; ws[n].checked = cfg.speaker; n++;
   ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 67; ws[n].w = 420; ws[n].h = 10;
   ws[n].text = "Create: improve my prompt with Qwen"; ws[n].checked = cfg.enhance; n++;
   ws[n].type = W_CHECK; ws[n].x = 8; ws[n].y = 80; ws[n].w = 420; ws[n].h = 10;
@@ -292,10 +295,18 @@ void app_settings( void ) {
   cfg.port = (unsigned)atoi( port ) ? (unsigned)atoi( port ) : 8286;
   cfg.slide_delay = atoi( delay ) > 0 ? atoi( delay ) : 8;
   cfg.sound = ws[ck].checked;
-  cfg.enhance = ws[ck + 1].checked;
-  cfg.review = ws[ck + 2].checked;
-  cfg.draw_enhance = ws[ck + 3].checked ? 1 : -1;
+  cfg.enhance = ws[ck + 2].checked;                 // ck + 1 is the speaker check box (spw)
+  cfg.review = ws[ck + 3].checked;
+  cfg.draw_enhance = ws[ck + 4].checked ? 1 : -1;
   snd_enabled = cfg.sound;
+  cfg.speaker = ws[spw].checked;
+  if ( cfg_speaker( ) != snd_speaker ) {            // music and sound effects move to the other output now
+    jb_stop( );
+    snd_done( );
+    snd_speaker = cfg_speaker( );
+    music_set_output( snd_speaker ? MUSIC_SPEAKER : MUSIC_CHIP );
+    snd_init( );
+  }
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   char path[80];
   cfg_path( path, app_dir );
@@ -311,7 +322,7 @@ void app_about( void ) {
   r.h.ah = 0x48; r.w.bx = 0xFFFF; intdos( &r, &r );
   char ip[20] = "-";
   if ( app_net ) net_my_ip( ip );
-  sprintf( t, "DeskMind 0.9.3 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen, draw with Krea 2 and "
+  sprintf( t, "DeskMind 0.10.0 for the Tandy 1000 TL/3 and CGA PCs%s. Chat with Qwen, draw with Krea 2 and "
               "compose with MIDI-GPT through MindServer at %s:%u. This %s: %s. Free memory %uK, EMS %dK, "
               "slideshow %s. Built with Open Watcom and mTCP (GPLv3). "
               "Limits: the newest 500 pictures, 100 chats and 150 songs; a chat holds about 40,000 "

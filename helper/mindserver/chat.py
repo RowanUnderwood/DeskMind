@@ -55,7 +55,8 @@ PROMPTS = {"chat": "system_chat.txt", "enhance": "enhance.txt", "vision": "visio
            "music_chat": "music_chat.txt", "music_spec": "music_spec.txt",
            # How Qwen draws/composes/searches: tool calls, or the older <draw>/<music> tags
            "tools_chat": "tools_chat.txt", "tools_chat_cga": "tools_chat_cga.txt", "search_chat": "search_chat.txt",
-           "music_tools": "music_tools.txt", "draw_tags": "draw_tags.txt", "draw_tags_cga": "draw_tags_cga.txt"}
+           "music_tools": "music_tools.txt", "draw_tags": "draw_tags.txt", "draw_tags_cga": "draw_tags_cga.txt",
+           "music_speaker": "music_speaker.txt"}
 HISTORY_CHARS = 24000          # how much earlier conversation is sent along
 OLD_DRAW_NOTE = re.compile(r"\[You drew picture [0-9A-Za-z]{1,12}:[^\]]*\]", re.IGNORECASE)
 
@@ -193,7 +194,7 @@ class ChatEngine:
     # ------------------------------------------------------------ helpers
 
     def _system(self, mode: str | None = None, tools: bool = False, music: bool = False,
-                search: bool = False) -> str:
+                search: bool = False, speaker: bool = False) -> str:
         parts = [load_prompt("chat", mode)]
         if tools:
             parts.append(load_prompt("tools_chat", mode))
@@ -201,6 +202,8 @@ class ChatEngine:
                 parts.append(load_prompt("search_chat"))
             if music:
                 parts.append(load_prompt("music_tools"))
+                if speaker:
+                    parts.append(load_prompt("music_speaker"))
         else:
             parts.append(load_prompt("draw_tags", mode))
             if music:
@@ -307,7 +310,8 @@ class ChatEngine:
     # ------------------------------------------------------------ chat reply
 
     def reply(self, chat_id: str | None, user_text: str, image_id: str | None, emit,
-              enhance_draw: bool | None = None, mode: str | None = None, music: bool = False) -> dict:
+              enhance_draw: bool | None = None, mode: str | None = None, music: bool = False,
+              speaker: bool = False) -> dict:
         """`mode` is the asking machine's picture mode ("cga" for a CGA PC): it picks the prompts and
         the mode of pictures drawn in this reply.  None = the default (Tandy)."""
         user_text = user_text.strip()
@@ -328,18 +332,19 @@ class ChatEngine:
         music = music and self.music is not None
         if self.config["qwen"].get("tools", True):
             try:
-                return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, True)
+                return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, True, speaker)
             except _ToolsRejected as e:
                 log.warning("NInfer rejected tool calls (%s); this reply uses <draw> tags", e)
                 chat["messages"].pop()             # the user message _answer added; it is added again
-        return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, False)
+        return self._answer(chat, user_text, image_id, emit, enhance_draw, mode, music, False, speaker)
 
     def _answer(self, chat: dict, user_text: str, image_id: str | None, emit, enhance_draw: bool | None,
-                mode: str | None, music: bool, tools: bool) -> dict:
+                mode: str | None, music: bool, tools: bool, speaker: bool = False) -> dict:
         """One reply, with tool calls (`tools`) or with tags."""
         search = tools and self.search.available()
         # One system message only: Qwen chat templates (ThinkingCap's at least) reject a later one
-        system = self._system(mode, tools, music, search)
+        system = self._system(mode, tools, music, search, speaker)
+        styles = self.music.styles() if music else None
         msgs = [{"role": "system", "content": system}] + self._history(chat, tools)
         # The picture in view: the one attached now, or else the most recent one in this chat
         view_id, earlier = image_id, False
@@ -369,7 +374,7 @@ class ChatEngine:
         rnd = 0
         try:
             while True:
-                schema = TL.schemas(music, search and rnd < max_rounds, mode) if tools else None
+                schema = TL.schemas(music, search and rnd < max_rounds, mode, styles) if tools else None
                 calls, said = [], []
                 try:
                     for kind, t in self.qwen.stream(msgs, effort, tools=schema):
@@ -396,8 +401,8 @@ class ChatEngine:
                         log.warning("tool call %s: the arguments aren't a JSON object", c["name"])
                     elif c["name"] == TL.DRAW and str(a.get("prompt", "")).strip():
                         draws.append(" ".join(str(a["prompt"]).split()))
-                    elif c["name"] == TL.MUSIC and music:
-                        songs.append(TL.music_request(a))
+                    elif c["name"] in TL.MUSIC_TOOLS and music:
+                        songs.append((c["name"], a))
                 if not search or rnd >= max_rounds or not any(
                         c["name"] in TL.SEARCH_TOOLS and c["args"] is not None for c in calls):
                     break
@@ -421,7 +426,7 @@ class ChatEngine:
             return chat
 
         draws += splitter.prompts                    # tags still count in tool mode
-        songs += splitter.music
+        songs += [(TL.MUSIC, {"description": m}) for m in splitter.music]
         answer = TX.clean("".join(visible_raw))
         if not answer and not draws and not songs:
             emit("E The answer was empty" + (" (cut off: raise max tokens)" if finish == "length" else ""))
@@ -434,7 +439,8 @@ class ChatEngine:
         if draws:
             self._draw(chat, amsg, draws[0], emit, enhance_draw, mode)
         if songs and music:
-            self._music(chat, amsg, songs[0], emit)
+            for name, args in songs[:2]:                 # e.g. keep a sketch, then a new drum pattern
+                self._music(chat, amsg, name, args, emit)
         emit("D")
         return chat
 
@@ -445,8 +451,8 @@ class ChatEngine:
         name, a = call["name"], call["args"] or {}
         if name == TL.DRAW:
             return "The picture will be drawn when your reply is finished; it then appears in the chat."
-        if name == TL.MUSIC:
-            return ("The song will be composed when your reply is finished; it then appears in the chat."
+        if name in TL.MUSIC_TOOLS:
+            return ("This will be done when your reply is finished; the song then appears in the chat."
                     if music else "Songs can't be played on this computer.")
         if name not in TL.SEARCH_TOOLS:
             return f"There is no tool called {name}."
@@ -462,8 +468,35 @@ class ChatEngine:
         searches.append({"name": name, "args": a, "summary": text[:TL.SUMMARY_CHARS]})
         return text
 
-    def _music(self, chat: dict, amsg: dict, request: str, emit) -> None:
-        job = self.music.submit(request)
+    def _song_ref(self, chat: dict, which: str) -> dict | None:
+        """A song of this chat: 'latest' (the newest one not replaced), or sketch 'A' / 'B'."""
+        live = [e for m in chat["messages"] for e in m.get("music", [])
+                if not e.get("replaced") and self.music.store.exists(e["id"])]
+        if which in ("A", "B"):
+            return next((e for e in reversed(live) if e.get("kind") == "sketch" and
+                         e.get("title", "").startswith(f"Sketch {which}")), None)
+        return live[-1] if live else None
+
+    def _music(self, chat: dict, amsg: dict, name: str, args: dict, emit) -> None:
+        """A song action after the reply: compose (or two sketches), revise, keep a sketch, or undo.
+        New songs stream as 'M <id> <title>', the ones they replace as 'R <id>'."""
+        request = ""
+        if name == TL.MUSIC:
+            request = TL.music_request(args)
+            hints = {k: args[k] for k in ("style", "length") if args.get(k)}
+            job = (self.music.submit_sketches if args.get("sketches") else self.music.submit)(request, hints=hints)
+        else:
+            ref = self._song_ref(chat, args.get("which") if name == TL.KEEP else (args.get("song") or "latest"))
+            if not ref:
+                emit("E There is no such song in this chat to change.")
+                return
+            request = ref.get("request", "")
+            if name == TL.KEEP:
+                job = self.music.submit_build(ref["id"], args.get("length", ""))
+            elif name == TL.UNDO:
+                job = self.music.submit_undo(ref["id"])
+            else:
+                job = self.music.submit_revise(ref["id"], self.music.edits_from_args(ref["id"], args), request)
         emit("S composing")
         line = job.line()
         deadline = time.time() + 10 * 60
@@ -472,12 +505,38 @@ class ChatEngine:
             if new == line:
                 emit("S composing")              # keep-alive for the Tandy's timeout
             line = new
-        if job.status == "done":
-            emit(f"M {job.music_id} {job.title}".rstrip())
-            amsg.setdefault("music", []).append({"id": job.music_id, "title": job.title, "request": request})
-            self.chats.save(chat)
-        else:
+        if job.status != "done":
             emit(f"E Composing failed: {job.error or 'timed out'}")
+            return
+        result = self._music_result(name, job)
+        for k, (mid, title) in enumerate(job.results):
+            emit(f"M {mid} {title}".rstrip())
+            entry = {"id": mid, "title": title, "request": request,
+                     "kind": self.music.store.meta(mid).get("kind", "song"), "tool": name, "args": args,
+                     "result": result}
+            if k:
+                entry["same_call"] = True        # the second sketch of one compose_music call
+            amsg.setdefault("music", []).append(entry)
+        for r in job.replaced:
+            emit(f"R {r}")
+            for m in chat["messages"]:
+                for e in m.get("music", []):
+                    if e["id"] == r:
+                        e["replaced"] = True
+        self.chats.save(chat)
+
+    @staticmethod
+    def _music_result(name: str, job) -> str:
+        titles = " and ".join(f'"{t}"' for _, t in job.results)
+        if name == TL.MUSIC and len(job.results) > 1:
+            return f"Two sketches were composed, {titles}; the user can play both and keep one (keep_sketch)."
+        if name == TL.MUSIC:
+            return TL.music_result(job.title)
+        if name == TL.KEEP:
+            return f"The sketch was kept and built into a full song, {titles} ({job.change}); the other sketch is gone."
+        if name == TL.UNDO:
+            return f"Undone: the song is back to its earlier version ({job.change})."
+        return f"Revised: {job.change}. The new version {titles} replaced the old one in the chat."
 
     def _draw(self, chat: dict, amsg: dict, prompt: str, emit, enhance: bool | None,
               mode: str | None = None) -> None:

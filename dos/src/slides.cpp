@@ -1,10 +1,11 @@
 // SLIDES - stand-alone DeskMind slideshow (no network needed, any boot mode).
 //
-//   SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/CGA]
+//   SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/CGA] [/SPEAKER]
 //
 //   folder     pictures (*.TPI); default: DeskMind's PICS folder from DESKMIND.CFG
 //              (PICSCGA in CGA mode), else the current folder
 //   /CGA       CGA pictures on any PC (automatic without Tandy Video II)
+//   /SPEAKER   music on the PC speaker (automatic without the Tandy chip; also DeskMind's setting)
 //   /D n       seconds per picture (default from DESKMIND.CFG, else 8)
 //   /E n       transition: 0 random, 1 cut, 2 wipe right, 3 wipe down, 4 blinds,
 //              5 interlace, 6 dissolve, 7 box out, 8 box in, 9 slide in
@@ -53,8 +54,9 @@ static void poll_music( void ) { jb_poll( ); }
 static void usage( void ) {
   printf( "SLIDES - DeskMind slideshow for the Tandy 1000 SL/TL/RL (640x200x16) and CGA PCs\n\n"
           "  SLIDES [folder] [/D seconds] [/E effect] [/R] [/NOTITLE] [/ONCE] [/LIST] [/CGA] [/NOEMS]\n"
-          "         [/M R|OFF|song]\n\n"
+          "         [/M R|OFF|song] [/SPEAKER]\n\n"
           "  /CGA: CGA pictures (automatic on a PC without Tandy Video II)\n"
+          "  /SPEAKER: music on the PC speaker (automatic on a PC without the Tandy chip)\n"
           "  /R: random order (or tick \"Slideshow: random order\" in DeskMind's Settings)\n"
           "  /LIST: print the play order and exit\n"
           "  /M: music: R random songs, OFF none, or a song (name in the MUSIC folder or a .T3 path)\n"
@@ -85,7 +87,11 @@ int main( int argc, char *argv[] ) {
   int haveCfg = cfg_load( cfgFile ) == 0;
   // CGA first: it decides the default folder and which pictures count
   int forceCga = 0;
-  for ( int i = 1; i < argc; i++ ) if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
+  for ( int i = 1; i < argc; i++ ) {
+    if ( str_ieq( argv[i], "/CGA" ) ) forceCga = 1;
+    if ( str_ieq( argv[i], "/SPEAKER" ) ) cfg_speaker_forced = 1;
+  }
+  music_set_output( cfg_speaker( ) ? MUSIC_SPEAKER : MUSIC_CHIP );   // DESKMIND.CFG's setting counts too
   cfg_cga = forceCga || vid_detect( ) != VT_SLTL;
   tpi_cga = cfg_cga;
 
@@ -118,7 +124,7 @@ int main( int argc, char *argv[] ) {
       else if ( str_ieq( a, "R" ) ) cfg.slide_music = 1;
       else song = a;
     }
-    else if ( str_ieq( a, "/CGA" ) ) ;
+    else if ( str_ieq( a, "/CGA" ) || str_ieq( a, "/SPEAKER" ) ) ;
     else if ( a[0] != '/' ) str_copy( s_dir, a, sizeof( s_dir ) );
     else { printf( "Unknown option %s\n\n", a ); usage( ); return 1; }
   }

@@ -1,5 +1,30 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 10: DeskMind 0.10.0, music v2 (long songs from disk, PC speaker, revisions)
+
+**New:** songs over 32 KB play from the disk through a 16 KB buffer; music (and the sound effects) can play on the PC
+speaker; the Music screen has Revise... / Undo / Try two / Keep, and Chat understands "two sketches", "keep B", "new
+drums", "undo". Checked in DOSBox (MUSTEST, all PASS) and 86Box (a 48 KB song playing in the Music screen).
+**First on the PC:** restart MindServer *and* the music worker (STOP-MINDSERVER.bat, START-MINDSERVER.bat): both have
+new code. Until then the revision buttons say "MindServer refused it".
+
+1. **Normal boot**, `CD \DMTEST`, then these four (each ends with MUSTEST PASSED; the results also go to MUSTEST.LOG):
+   - `MUSTEST RASTER.T3 /S 20` (the proven path, regression)
+   - `MUSTEST LONG.T3 /S 60` (48 KB, streamed: "no underruns")
+   - `MUSTEST LONG.T3 /S 40 /STALL 6` (forced to run dry: "underruns: n", still PASS)
+   - `MUSTEST RASTER.T3 /S 20 /SPK RASTER.SPK` (**PC speaker**: you should hear the tune on the speaker; the counts
+     must match the PC's reference)
+2. `DESKMIND`, F7: **LONGTEST** (2:34) > Play. It plays from the disk: let it run into Chat, Gallery thumbnails and a
+   Sync. Any audible gap? The panel says "Waited for the disk n times" if the buffer ran dry.
+3. Settings (F5): tick **Use the PC speaker**, Save. Play Raster Rush: is it recognisable on the speaker? Untick, Save:
+   back on the chip. Also `DESKMIND /SPEAKER` and `SLIDES /SPEAKER`.
+4. **W boot**, Chat: "two short sketches of a cracktro tune" (two cards, Sketch A plays), "keep B" (the sketches
+   disappear, the full song plays), "keep the tune but different drums", "undo that". The Music screen should end
+   with one song for it.
+5. Music screen: select a song > **Revise...**: untick the tune, Revise. Then **Undo**, **Try two**, and **Keep** on a
+   sketch. Report anything odd in the dialog or the list.
+6. Chat: "an epic cracktro for my slideshow" (about 5 minutes, ~100 KB, played from disk).
+
 ## Round 9.2: DeskMind 0.9.2, dialogs give their memory back
 
 **Your round 9.1 finding:** Help > About went from 145K to 69K just by opening Settings. Each dialog saves the screen
