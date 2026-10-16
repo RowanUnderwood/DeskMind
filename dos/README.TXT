@@ -1,4 +1,4 @@
-DESKMIND 0.10.0 - AI chat, pictures and music for the Tandy 1000 TL/3 (and CGA)
+DESKMIND 0.10.1 - AI chat, pictures and music for the Tandy 1000 TL/3 (and CGA)
 ===========================================================================
 
 DeskMind talks over the PicoMEM WiFi to MindServer on the PC, which runs

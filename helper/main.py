@@ -6,6 +6,8 @@
 
 import argparse
 import logging
+import logging.handlers
+import os
 import sys
 import time
 
@@ -23,6 +25,17 @@ def main() -> int:
     config = Config()
     if args.port:
         config.data["server"]["port"] = args.port
+
+    # The same log in out\mindserver.log, so an intermittent failure on the Tandy can be matched to what
+    # MindServer saw (each request line has the Tandy's port; DeskMind's NET.LOG has the time).
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
+    os.makedirs(out, exist_ok=True)
+    name = "mindserver.log" if not args.port else f"mindserver{args.port}.log"
+    fh = logging.handlers.RotatingFileHandler(os.path.join(out, name), maxBytes=2_000_000, backupCount=3,
+                                              encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s",
+                                      "%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(fh)
 
     server = MindServer(config)
     server.start()

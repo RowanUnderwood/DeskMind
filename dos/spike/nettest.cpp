@@ -149,6 +149,7 @@ int main( int argc, char *argv[] ) {
   if ( argc > 2 ) g_port = (unsigned)atoi( argv[2] );
 
   g_log = fopen( "NETTEST.LOG", "a" );
+  strcpy( net_log_path, "NET.LOG" );            // failures and recovered connects, as in DeskMind
   logf( "\n=== DeskMind NETTEST -> %s:%u ===\n", g_host, g_port );
 
   logf( "MTCPCFG=%s\n", getenv( "MTCPCFG" ) ? getenv( "MTCPCFG" ) : "(not set)" );

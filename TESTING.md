@@ -1,5 +1,29 @@
 # Tests on the real Tandy 1000 TL/3
 
+## Round 10.1: DeskMind 0.10.1, network retries (round 10 step 5 problems)
+
+**What round 10 showed:** every revise that failed on the Tandy had finished on the PC (the library has two "Meadow
+Wanderings song 5" with the same parent, and Space Pictures went up to E and then F#). The WiFi lost the answer, and
+retrying made a second revision.
+**Fixed:** a connect now tries again every 3 s (mTCP would only resend a lost SYN after 10 s, exactly when DeskMind
+gave up); revise / undo / try two / keep send their request again with the same key (MindServer gives back the same
+job, no duplicate) and the wait for the result reconnects; MindServer sends a line every 5 s while a song is made.
+Every network failure adds a line to **`C:\DESKMIND\NET.LOG`**, and MindServer now logs to `helper\out\mindserver.log`.
+**First on the PC:** restart MindServer (STOP-MINDSERVER.bat, START-MINDSERVER.bat); the music worker can stay.
+
+1. **W boot**, `DESKMIND`, F7. Repeat round 10 step 5 for a while (Revise key higher/lower, drums, Undo, Try two,
+   Keep), with a song playing as before. You may see "No answer, asking again..." or "Connection lost, asking
+   again..." in the busy box: that's the fix at work. Report any error box (its text) and whether a song ever got
+   revised twice (two steps of key change for one click).
+   passed with no issues.
+2. Afterwards, bring back `C:\DESKMIND\NET.LOG` (or a photo of `TYPE NET.LOG`) if it exists, plus the time of any error
+   box: I'll match it against `mindserver.log`.
+   Could not locate any `C:\DESKMIND\NET.LOG` after exiting deskmind.
+   **Expected:** NET.LOG is written only on a failure or a connect that needed more than one try. mindserver.log
+   agrees: 74 Tandy requests 14:12-14:28 on consecutive client ports (a retried connect skips one) and no repeated
+   request key. The network didn't drop anything this session, so the retry paths are still unexercised on the TL/3;
+   if an error or "asking again..." shows up later, check NET.LOG then. Create screen also fine.
+
 ## Round 10: DeskMind 0.10.0, music v2 (long songs from disk, PC speaker, revisions)
 
 **New:** songs over 32 KB play from the disk through a 16 KB buffer; music (and the sound effects) can play on the PC
@@ -14,16 +38,27 @@ new code. Until then the revision buttons say "MindServer refused it".
    - `MUSTEST LONG.T3 /S 40 /STALL 6` (forced to run dry: "underruns: n", still PASS)
    - `MUSTEST RASTER.T3 /S 20 /SPK RASTER.SPK` (**PC speaker**: you should hear the tune on the speaker; the counts
      must match the PC's reference)
+     passed:
 2. `DESKMIND`, F7: **LONGTEST** (2:34) > Play. It plays from the disk: let it run into Chat, Gallery thumbnails and a
    Sync. Any audible gap? The panel says "Waited for the disk n times" if the buffer ran dry.
+   passed
 3. Settings (F5): tick **Use the PC speaker**, Save. Play Raster Rush: is it recognisable on the speaker? Untick, Save:
    back on the chip. Also `DESKMIND /SPEAKER` and `SLIDES /SPEAKER`.
+   passed synced 9 pictures with no skipping
 4. **W boot**, Chat: "two short sketches of a cracktro tune" (two cards, Sketch A plays), "keep B" (the sketches
    disappear, the full song plays), "keep the tune but different drums", "undo that". The Music screen should end
    with one song for it.
+   Passed
 5. Music screen: select a song > **Revise...**: untick the tune, Revise. Then **Undo**, **Try two**, and **Keep** on a
    sketch. Report anything odd in the dialog or the list.
+   
+    Revise with key "higher" got "connection reset" (intermitant)
+    Sometimes we get "no answer from 192.168.2.192:8286" error.  (retry and it works)
+    On revise key up on space pictures we got "the server stopped answering" once.
+    
+   
 6. Chat: "an epic cracktro for my slideshow" (about 5 minutes, ~100 KB, played from disk).
+passed
 
 ## Round 9.2: DeskMind 0.9.2, dialogs give their memory back
 

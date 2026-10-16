@@ -255,6 +255,7 @@ class MusicService:
         self.store = store or MusicStore()
         self.jobs: dict[int, MusicJob] = {}
         self.next_id = 1
+        self.requests: dict[str, int] = {}        # DeskMind's request key -> job (a retried POST gets the same job)
         self.q: queue.Queue[MusicJob] = queue.Queue()
         self.cond = threading.Condition()
         self._styles = (STYLES, dict(DESCRIPTIONS), 0.0)
@@ -268,6 +269,25 @@ class MusicService:
             self.next_id += 1
             self.jobs[job.id] = job
         self.q.put(job)
+        return job
+
+    def seen(self, req: str | None) -> MusicJob | None:
+        """The job an earlier POST with this request key made.  DeskMind retries a POST whose answer the
+        WiFi lost, and the first one may already have made (or undone) a song."""
+        if not req:
+            return None
+        with self.cond:
+            job = self.jobs.get(self.requests.get(req[:32], 0))
+        if job is not None:
+            log.info("music job %d: request %s again (a retry)", job.id, req)
+        return job
+
+    def remember(self, req: str | None, job: MusicJob) -> MusicJob:
+        if req:
+            with self.cond:
+                self.requests[req[:32]] = job.id
+                while len(self.requests) > 200:
+                    del self.requests[next(iter(self.requests))]
         return job
 
     def submit(self, request: str, spec: dict | None = None, hints: dict | None = None) -> MusicJob:

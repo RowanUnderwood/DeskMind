@@ -121,7 +121,7 @@ static void sound_check( void ) {
     struct dostime_t t;
     _dos_getdate( &d );
     _dos_gettime( &t );
-    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.10.0 ===\n",
+    fprintf( f, "\n=== F9 step %d   %04u-%02u-%02u %02u:%02u:%02u   DeskMind 0.10.1 ===\n",
              s_f9Step, d.year, d.month, d.day, t.hour, t.minute, t.second );
     snd_diag( f );
     fclose( f );
@@ -187,7 +187,7 @@ int main( int argc, char *argv[] ) {
   str_copy( net_token, cfg.token, sizeof( net_token ) );
   snd_enabled = cfg.sound;
 
-  printf( cfg_cga ? "DeskMind 0.10.0 (CGA)\n" : "DeskMind 0.10.0\n" );
+  printf( cfg_cga ? "DeskMind 0.10.1 (CGA)\n" : "DeskMind 0.10.0\n" );
   if ( !noNet ) {
     printf( "Starting the network...\n" );
     app_net = ( net_init( ) == 0 );
@@ -222,6 +222,7 @@ int main( int argc, char *argv[] ) {
   gui_f9 = sound_check;
   net_event_hook = net_event;
   net_wait_hook = gui_pump;               // the pointer keeps moving during network waits
+  sprintf( net_log_path, "%sNET.LOG", app_dir );   // one line per network failure, for later diagnosis
   app_redraw_fn = redraw_all;
 
   s_screen = SCR_CHAT;

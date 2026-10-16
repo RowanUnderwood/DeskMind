@@ -8,6 +8,7 @@
 #include <dos.h>
 #include <io.h>
 #include <direct.h>
+#include <conio.h>
 
 #include "app.h"
 #include "scr.h"
@@ -279,55 +280,102 @@ static void apply_job( char ids[][9], char titles[][40], int n, char repl[][9], 
 
 // POST path (JSON body or none) -> "J <n>", then GET /music/job/<n>?wait=1 for the result:
 // M <id> <title> per new song and R <id> per song it replaces.  0 = it worked.
-static int run_job( const char *path, const char *body, const char *what ) {
-  if ( !app_need_net( what ) ) return 1;
+// The WiFi drops packets now and then (real TL/3, round 10): a lost answer used to end the job with
+// "Connection reset" or "The server stopped answering" although MindServer finished it, and the
+// user's retry made a second revision.  Now each request carries a key (?req=): a POST that got
+// no answer is sent again with the same key and MindServer hands back the job the first one made.
+// The wait for the result reconnects too (it only asks), and MindServer sends a line every 5 s.
+#define JOB_TRIES 3
+
+static int s_cancel;
+
+static void retry_pause( const char *text ) {
+  busy_text( text );
+  unsigned long t0 = ticks( );
+  while ( ticks( ) - t0 < 18 ) { net_poll( ); if ( kbd_get( ) == K_ESC ) s_cancel = 1; }
+}
+
+// One POST: the job number, 0 if MindServer answered without one (err set, *st = HTTP status),
+// or 0 with *st < 0 when the network lost it.
+static int post_job( const char *path, const char *body, char *err, int *st ) {
   static char line[ 120 ];
-  static char ids[3][9], titles[3][40], repl[4][9];
-  int n = 0, nr = 0, job = 0, st = NET_ERROR, cancelled = 0;
-  char err[100] = "";
-  unsigned long save = net_timeout_ms;
-  net_timeout_ms = 20000;
-  busy_begin( what, "Asking MindServer..." );
+  int job = 0;
+  *st = NET_ERROR;
   if ( http_open( cfg.server, cfg.port, "POST", path, body, body ? (unsigned)strlen( body ) : 0,
                   body ? "application/json" : 0 ) == 0 ) {
-    while ( ( st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { cancelled = 1; break; }
-    while ( !cancelled ) {
+    while ( ( *st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { s_cancel = 1; break; }
+    while ( *st > 0 && !s_cancel ) {
       int rc = http_line( line, sizeof( line ) );
       if ( rc == NET_AGAIN ) continue;
       if ( rc == 1 && line[0] == 'J' ) job = atoi( line + 2 );
       else if ( rc == 1 && line[0] == 'E' ) str_copy( err, line + 2, sizeof( err ) );
+      else if ( rc != NET_DONE && rc != 1 ) *st = rc;      // lost on the way
       break;
     }
   }
   http_close( );
+  return job;
+}
+
+static int run_job( const char *path, const char *body, const char *what ) {
+  if ( !app_need_net( what ) ) return 1;
+  static char line[ 120 ], url[ 64 ];
+  static char ids[3][9], titles[3][40], repl[4][9];
+  int n = 0, nr = 0, job = 0, st = NET_ERROR, done = 0;
+  char err[100] = "";
+  unsigned long save = net_timeout_ms;
+  s_cancel = 0;
+  outp( 0x43, 0 );                               // request key: BIOS ticks and the PIT counter
+  unsigned pit = inp( 0x40 ); pit |= inp( 0x40 ) << 8;
+  sprintf( url, "%s?req=%08lX%04X", path, ticks( ), pit );
+  net_timeout_ms = 20000;
+  busy_begin( what, "Asking MindServer..." );
+  for ( int t = 0; t < JOB_TRIES && !s_cancel; t++ ) {
+    if ( t ) retry_pause( "No answer, asking again..." );
+    if ( s_cancel ) break;
+    err[0] = 0;
+    job = post_job( url, body, err, &st );
+    if ( job > 0 || st > 0 ) break;              // a job, or MindServer said no: don't repeat
+  }
   if ( job > 0 ) {
     char p[40];
     sprintf( p, "/music/job/%d?wait=1", job );
     busy_text( "Composing on the PC..." );
-    net_timeout_ms = 60000;                      // the job sends a line every 5 s while it works
-    if ( http_open( cfg.server, cfg.port, "GET", p, 0, 0, 0 ) == 0 ) {
-      while ( ( st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { cancelled = 1; break; }
-      while ( st == 200 && !cancelled ) {
-        int rc = http_line( line, sizeof( line ) );
-        if ( rc == NET_AGAIN ) { if ( kbd_get( ) == K_ESC ) cancelled = 1; continue; }
-        if ( rc != 1 || line[0] == 'D' ) break;
-        if ( line[0] == 'M' && n < 3 && strlen( line ) >= 10 ) {
-          str_copy( ids[n], line + 2, 9 );
-          str_copy( titles[n], strlen( line ) > 11 ? line + 11 : ids[n], 40 );
-          n++;
+    for ( int t = 0; t < JOB_TRIES && !done && !s_cancel; t++ ) {
+      if ( t ) retry_pause( "Connection lost, asking again..." );
+      if ( s_cancel ) break;
+      n = nr = 0; err[0] = 0;                    // the results come again, all of them
+      if ( http_open( cfg.server, cfg.port, "GET", p, 0, 0, 0 ) == 0 ) {
+        while ( ( st = http_headers( ) ) == NET_AGAIN ) if ( kbd_get( ) == K_ESC ) { s_cancel = 1; break; }
+        while ( st == 200 && !s_cancel ) {
+          int rc = http_line( line, sizeof( line ) );
+          if ( rc == NET_AGAIN ) { if ( kbd_get( ) == K_ESC ) s_cancel = 1; continue; }
+          if ( rc != 1 ) break;                  // lost (or closed without D): ask again
+          if ( line[0] == 'D' ) { done = 1; break; }
+          if ( line[0] == 'M' && n < 3 && strlen( line ) >= 10 ) {
+            str_copy( ids[n], line + 2, 9 );
+            str_copy( titles[n], strlen( line ) > 11 ? line + 11 : ids[n], 40 );
+            n++;
+          }
+          else if ( line[0] == 'R' && nr < 4 ) str_copy( repl[ nr++ ], line + 2, 9 );
+          else if ( line[0] == 'E' ) str_copy( err, line + 2, sizeof( err ) );
         }
-        else if ( line[0] == 'R' && nr < 4 ) str_copy( repl[ nr++ ], line + 2, 9 );
-        else if ( line[0] == 'E' ) str_copy( err, line + 2, sizeof( err ) );
+        if ( st > 0 && st != 200 ) done = 1;     // MindServer answered (no such job): final
       }
+      http_close( );                             // one socket: downloads only after this
     }
-    http_close( );                               // one socket: downloads only after this
   }
+  int cancelled = s_cancel;
   net_timeout_ms = save;
   if ( !cancelled && n ) apply_job( ids, titles, n, repl, nr );
   busy_end( );
   if ( cancelled ) { note( "Cancelled (MindServer may still finish it: Sync fetches it)." ); return 1; }
   if ( !n ) {
-    msg_box( what, err[0] ? err : job > 0 ? net_error( ) : st > 0 ? "MindServer refused it (update MindServer)." : net_error( ), "OK" );
+    static char m[160];
+    if ( err[0] ) str_copy( m, err, sizeof( m ) );
+    else if ( job > 0 ) sprintf( m, "%s.  MindServer may still finish it: Sync fetches it.", net_error( ) );
+    else str_copy( m, st > 0 ? "MindServer refused it (update MindServer)." : net_error( ), sizeof( m ) );
+    msg_box( what, m, "OK" );
     return 1;
   }
   return 0;

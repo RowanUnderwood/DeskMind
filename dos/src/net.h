@@ -15,6 +15,7 @@
 extern unsigned long net_timeout_ms;     // default 30000
 extern int net_verbose;                  // 1 = net_init prints its steps (text mode only)
 extern char net_token[40];               // sent as X-Token when set
+extern char net_log_path[80];            // when set, each network failure appends a line here (NET.LOG)
 extern unsigned long net_connect_ms;     // connect timeout, default 10000
 extern void ( *net_wait_hook )( void );  // called while waiting (keep the mouse pointer alive)
 extern void ( *net_event_hook )( int );  // 1 = a connection opens, 0 = it closes (sound diagnostics)

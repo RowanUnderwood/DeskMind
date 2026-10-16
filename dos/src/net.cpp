@@ -30,6 +30,7 @@ void ( *net_event_hook )( int ) = 0;
 unsigned long net_timeout_ms = 30000ul;
 int           net_verbose = 0;
 char          net_token[40] = "";
+char          net_log_path[80] = "";
 
 static volatile uint8_t s_break = 0;
 static int         s_up = 0;
@@ -67,6 +68,36 @@ static uint16_t next_port( void ) {
 }
 
 const char *net_error( void ) { return s_err; }
+
+// One line per network failure in net_log_path (when set): the time, the error, what the
+// request was, and the stack's counters.  Real-TL/3 WiFi drops are intermittent; this is
+// what tells a lost SYN, a reset from the PC and a full receive buffer apart afterwards.
+static char s_what[60] = "";             // "GET /music/job/12?wait=1"
+
+static void net_log( const char *extra ) {
+  if ( !net_log_path[0] ) return;
+  FILE *f = fopen( net_log_path, "a" );
+  if ( !f ) return;
+  struct dosdate_t d; struct dostime_t t;
+  _dos_getdate( &d ); _dos_gettime( &t );
+  fprintf( f, "%04u-%02u-%02u %02u:%02u:%02u %s | %s | %s | rx %lu drop %lu retx %lu lowfree %u\n",
+           d.year, d.month, d.day, t.hour, t.minute, t.second, s_err, s_what, extra ? extra : "",
+           Packets_received, Packets_dropped, Tcp::Packets_Retransmitted, (unsigned)Buffer_lowFreeCount );
+  fclose( f );
+}
+
+static void fail( const char *msg, const char *extra ) {
+  set_err( msg );
+  net_log( extra );
+}
+
+// The socket went to CLOSED under us: say who ended it.
+static void reset_err( void ) {
+  uint8_t why = s_sock ? s_sock->getCloseReason( ) : 0;
+  if ( why == 1 )      fail( "Connection reset by the PC", "rst" );
+  else if ( why == 4 ) fail( "The network dropped the connection", "no ack after resends" );
+  else                 fail( "Connection reset", 0 );
+}
 
 int net_init( void ) {
   if ( s_up ) return 0;
@@ -148,48 +179,84 @@ static int send_all( const char far *data, unsigned len ) {
     net_poll( );
     int16_t rc = s_sock->send( (uint8_t *)( data + sent ), len - sent );
     if ( rc > 0 ) { sent += rc; start = TIMER_GET_CURRENT( ); }
-    else if ( rc < 0 ) { set_err( "Send failed" ); return NET_ERROR; }
+    else if ( rc < 0 ) { if ( s_sock->isClosed( ) ) reset_err( ); else fail( "Send failed", 0 ); return NET_ERROR; }
     if ( Timer_diff( start, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_timeout_ms ) ) {
-      set_err( "Send timed out" ); return NET_TIMEOUT;
+      fail( "Send timed out", 0 ); return NET_TIMEOUT;
     }
   }
   return 0;
 }
 
+// Connect s_sock to addr:port.  mTCP starts every socket at its maximum round-trip estimate
+// (10 s), so it resends a lost SYN only after 10 s: one dropped packet on the WiFi used to
+// fail the whole connect.  Instead a new attempt (new socket, new port) starts every 3 s
+// (a third of net_connect_ms when that is shorter) until net_connect_ms runs out.  A refused
+// attempt (reset: nothing listens on the port) is tried once more after half a second, then
+// it fails at once, as before: MindServer is simply not running.
+#define ATTEMPT_MS 3000ul
+
+static int tcp_connect( const char *host, IpAddr_t addr, unsigned port ) {
+  clockTicks_t start = TIMER_GET_CURRENT( );
+  unsigned long attempt = net_connect_ms / 3 < ATTEMPT_MS ? net_connect_ms / 3 : ATTEMPT_MS;
+  int tries = 0, refused = 0;
+  for ( ;; ) {
+    s_sock = TcpSocketMgr::getSocket( );
+    if ( !s_sock ) { fail( "No free socket", 0 ); return NET_ERROR; }
+    if ( s_sock->setRecvBuffer( RECV_BUFFER ) ) {
+      TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
+      fail( "Out of memory for the socket", 0 );
+      return NET_ERROR;
+    }
+    tries++;
+    if ( s_sock->connectNonBlocking( next_port( ), addr, port ) ) {
+      TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
+      fail( "Connect failed", 0 );
+      return NET_ERROR;
+    }
+    clockTicks_t at = TIMER_GET_CURRENT( );
+    int closed = 0;
+    for ( ;; ) {
+      net_poll( );
+      if ( s_sock->isConnectComplete( ) ) {
+        if ( tries > 1 ) {
+          char x[40];
+          sprintf( x, "connected on try %d", tries );
+          set_err( "(recovered)" );
+          net_log( x );
+        }
+        return 0;
+      }
+      if ( s_sock->isClosed( ) ) { closed = 1; break; }
+      if ( Timer_diff( at, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( attempt ) ) break;
+      if ( Timer_diff( start, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_connect_ms ) ) break;
+    }
+    refused += closed;
+    http_close( );
+    if ( refused >= 2 ) break;
+    if ( Timer_diff( start, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_connect_ms ) ) break;
+    if ( closed ) {
+      clockTicks_t w = TIMER_GET_CURRENT( );
+      while ( Timer_diff( w, TIMER_GET_CURRENT( ) ) < TIMER_MS_TO_TICKS( 500ul ) ) net_poll( );
+    }
+  }
+  sprintf( s_err, "No answer from %s:%u - is MindServer running?", host, port );
+  char x[40];
+  sprintf( x, "%d tries, %d refused", tries, refused );
+  net_log( x );
+  return NET_ERROR;
+}
+
 int http_open( const char *host, unsigned port, const char *method, const char *path,
                const char far *body, unsigned bodyLen, const char *contentType ) {
   if ( !s_up ) { set_err( "Network not started" ); return NET_ERROR; }
+  sprintf( s_what, "%.6s %.50s", method, path );
   if ( s_sock ) http_close( );
   if ( net_event_hook ) net_event_hook( 1 );
 
   IpAddr_t addr;
   if ( resolve( host, addr ) ) return NET_ERROR;
 
-  s_sock = TcpSocketMgr::getSocket( );
-  if ( !s_sock ) { set_err( "No free socket" ); return NET_ERROR; }
-  if ( s_sock->setRecvBuffer( RECV_BUFFER ) ) {
-    set_err( "Out of memory for the socket" );
-    TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
-    return NET_ERROR;
-  }
-
-  uint16_t localPort = next_port( );
-  if ( s_sock->connectNonBlocking( localPort, addr, port ) ) {
-    set_err( "Connect failed" );
-    TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
-    return NET_ERROR;
-  }
-  clockTicks_t start = TIMER_GET_CURRENT( );
-  for ( ;; ) {
-    net_poll( );
-    if ( s_sock->isConnectComplete( ) ) break;
-    if ( s_sock->isClosed( ) ||
-         Timer_diff( start, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_connect_ms ) ) {
-      sprintf( s_err, "No answer from %s:%u - is MindServer running?", host, port );
-      TcpSocketMgr::freeSocket( s_sock ); s_sock = 0;
-      return NET_ERROR;
-    }
-  }
+  if ( tcp_connect( host, addr, port ) ) return NET_ERROR;
 
   char req[400];
   int n = sprintf( req, "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: DeskMind/0.1\r\nConnection: close\r\n",
@@ -225,7 +292,7 @@ static int fill( void ) {
   if ( s_len == sizeof( s_buf ) ) return 0;
   net_poll( );
   int16_t rc = s_sock->recv( (uint8_t *)( s_buf + s_len ), sizeof( s_buf ) - s_len );
-  if ( rc < 0 ) { set_err( "Connection reset" ); return NET_ERROR; }
+  if ( rc < 0 ) { reset_err( ); return NET_ERROR; }
   if ( rc > 0 ) { s_len += rc; s_last = TIMER_GET_CURRENT( ); }
   return rc;
 }
@@ -233,7 +300,9 @@ static int fill( void ) {
 static int idle_state( void ) {
   if ( s_sock->isRemoteClosed( ) && !s_sock->recvDataWaiting( ) ) return NET_DONE;
   if ( Timer_diff( s_last, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_timeout_ms ) ) {
-    set_err( "The server stopped answering" );
+    char x[40];
+    sprintf( x, "silent %lu s, %u bytes buffered", net_timeout_ms / 1000ul, s_len );
+    fail( "The server stopped answering", x );
     return NET_TIMEOUT;
   }
   return NET_AGAIN;
@@ -256,7 +325,7 @@ int http_headers( void ) {
   if ( !end ) {
     if ( s_len == sizeof( s_buf ) ) { set_err( "Response headers too long" ); return NET_ERROR; }
     int st = idle_state( );
-    if ( st == NET_DONE ) { set_err( "The server closed the connection" ); return NET_ERROR; }
+    if ( st == NET_DONE ) { fail( "The server closed the connection", "before the headers" ); return NET_ERROR; }
     return st;
   }
 
@@ -290,7 +359,7 @@ int http_read( char far *buf, unsigned max ) {
   net_poll( );
   if ( max > 32767 ) max = 32767;
   int16_t rc = s_sock->recv( (uint8_t *)buf, max );
-  if ( rc < 0 ) { set_err( "Connection reset" ); return NET_ERROR; }
+  if ( rc < 0 ) { reset_err( ); return NET_ERROR; }
   if ( rc > 0 ) { s_last = TIMER_GET_CURRENT( ); return rc; }
   return idle_state( );
 }
@@ -368,17 +437,8 @@ int http_post_file( const char *host, unsigned port, const char *path, const cha
   IpAddr_t addr;
   if ( resolve( host, addr ) ) { fclose( f ); return NET_ERROR; }
   if ( s_sock ) http_close( );
-  s_sock = TcpSocketMgr::getSocket( );
-  if ( !s_sock || s_sock->setRecvBuffer( RECV_BUFFER ) ) { fclose( f ); set_err( "No free socket" ); return NET_ERROR; }
-  uint16_t localPort = next_port( );
-  if ( s_sock->connectNonBlocking( localPort, addr, port ) ) { fclose( f ); http_close( ); set_err( "Connect failed" ); return NET_ERROR; }
-  clockTicks_t start = TIMER_GET_CURRENT( );
-  while ( !s_sock->isConnectComplete( ) ) {
-    net_poll( );
-    if ( s_sock->isClosed( ) || Timer_diff( start, TIMER_GET_CURRENT( ) ) > TIMER_MS_TO_TICKS( net_connect_ms ) ) {
-      fclose( f ); http_close( ); set_err( "No answer from MindServer" ); return NET_ERROR;
-    }
-  }
+  sprintf( s_what, "POST %.50s", path );
+  if ( tcp_connect( host, addr, port ) ) { fclose( f ); return NET_ERROR; }
   char req[400];
   int n = sprintf( req, "POST %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: DeskMind/0.1\r\nConnection: close\r\n", path, host );
   if ( net_token[0] ) n += sprintf( req + n, "X-Token: %s\r\n", net_token );

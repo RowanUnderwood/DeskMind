@@ -361,6 +361,37 @@ in 10.1 s on the 4090. NInfer answers as model `qwen3.8-27b`.
     quiz.html` (63 clips); results pending. Ship = add names to `recipes.STYLES`, then restart the worker.
   - On the card 2026-10-15 (backups `..._before/after-deskmind-0100.img`): DESKMIND/SLIDES/README.TXT, MUSIC\LONGTEST.T3,
     DMTEST\MUSTEST.EXE + LONG/RASTER .T3/.SPK. TESTING.md round 10 (MindServer + worker need a restart first).
+  - **Real TL/3 round 10 (2026-10-16):** steps 1-4 and 6 passed (MUSTEST incl. speaker, LONGTEST from disk during
+    Sync, speaker setting, chat sketches/keep/drums/undo, epic song). Step 5 (Music screen revisions) had intermittent
+    "Connection reset", "No answer from 192.168.2.192:8286" and "The server stopped answering" (one retry worked).
+- **Network retries (0.10.1, 2026-10-16).** Every round-10 failure had **finished on the PC** (library: two
+  "Meadow Wanderings song 5" with one parent; Space Pictures E then F#): the WiFi lost the answer and the user's retry
+  made a duplicate revision. Findings: **mTCP starts each socket at SRTT 181 ticks, so a lost SYN is resent only
+  after 10.05 s, and `net_connect_ms` was 10 s**: one dropped packet failed the connect. "Connection reset" = mTCP
+  socket destroyed (closeReason 1 = RST from Windows, which aborts after ~5 unanswered resends; 4 = our resends
+  unacked). A key-up revise takes 0.5-0.8 s on the worker, so "stopped answering" was lost packets, not a slow job;
+  but `/music/job?wait=1` only sent a line on a status change, so a build > 60 s would also have timed out.
+  - `net.cpp` `tcp_connect()` (http_open + http_post_file): new socket/port every 3 s (a third of `net_connect_ms`
+    when shorter) until it runs out; 2 refusals (RST, nothing listening) fail at once as before. `reset_err()` says
+    "Connection reset by the PC" / "The network dropped the connection". `net_log_path` (DESKMIND: `NET.LOG` next to
+    the EXE; NETTEST: `NET.LOG`) gets one line per failure or recovered connect: time, error, request, `rx/drop/retx/
+    lowfree` (mTCP counters).
+  - `scr_music.cpp` `run_job`: `?req=<ticks+PIT hex>` on the POST, up to 3 POSTs while there's no answer (an HTTP
+    answer is final), then up to 3 waits for the result (20 s silence = lost; results come again on reconnect).
+  - MindServer: `MusicService.seen/remember` (request key -> job, last 200) checked **before** any validation (an undo
+    that already ran must not 404 the retry); `/music/job?wait=1` sends the status line every 5 s;
+    `Handler._route` reads every request body before the handler (Windows resets a socket closed with unread data,
+    and the reset can overtake an early 404/403); log file `helper\out\mindserver.log` (rotating, 2 MB x 4), request
+    lines include the client's port.
+  - Checked: live server test on a private instance with a temp music store (dedupe for revise/undo incl. after
+    completion, repeat wait, 404 with a body, heartbeat at 5 s gaps for a 12 s job), `test_core` ALL OK; 86Box SL/2
+    NETTEST all 5 PASS through the new connect, closed port fails in ~1.5 s ("2 tries, 2 refused" in NET.LOG). A lost
+    SYN can't be produced in 86Box; that path is checked on the real TL/3 only. On the card (backups
+    `..._before/after-deskmind-0101.img`); TESTING.md round 10.1. The Create screen's `/job` wait has no reconnect yet.
+  - **Real TL/3 round 10.1 (2026-10-16): no errors** repeating round 10 step 5; Create fine. No NET.LOG (none
+    expected). mindserver.log: 74 requests on consecutive client ports and no repeated request key, so **no retry
+    happened**: the fix is in place but its retry paths are still unexercised on real hardware. To spot retries
+    later: a gap in the client port sequence in mindserver.log, "again (a retry)" lines, or NET.LOG on the Tandy.
 - **Missing chat pictures (2026-10-04, chat DF21D117 / picture C7B1069D).** The server had the picture; the Tandy's download after the
   reply failed and was ignored, leaving a grey thumbnail and "Could not show this picture". Cause of that one failure unknown (no log, possibly WiFi),
   but `net.cpp` chose local ports with an **unseeded `rand()`**, so every run reused the same port sequence; now `next_port()` starts at

@@ -46,15 +46,21 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ helpers
 
     def log_message(self, fmt, *args):
-        log.info("%s %s", self.client_address[0], fmt % args)
+        log.info("%s:%s %s", self.client_address[0], self.client_address[1], fmt % args)
 
     def _query(self) -> dict:
         q = parse_qs(urlparse(self.path).query)
         return {k: v[0] for k, v in q.items()}
 
     def _body(self) -> bytes:
-        n = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(n) if n > 0 else b""
+        """The request body.  _route reads it before any handler runs: Windows answers a socket closed with
+        unread data in it with a reset, and that reset can overtake the reply (an early 404 or 403)."""
+        if self._raw is None:
+            n = int(self.headers.get("Content-Length") or 0)
+            self._raw = self.rfile.read(n) if n > 0 else b""
+        return self._raw
+
+    _raw: bytes | None = None
 
     def _authorised(self) -> bool:
         token = self.app.config["server"]["token"]
@@ -93,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
     def _route(self, method: str):
         path = urlparse(self.path).path.rstrip("/") or "/"
         self.app.note_client(self.client_address[0])
+        self._raw = None
+        self._body()
         if not self._authorised():
             self.send_text("E Wrong token\n", 403)
             return
@@ -361,8 +369,23 @@ def h_list(h: Handler):
 
 # ---------------------------------------------------------------- music
 
+def _music_again(h: Handler) -> bool:
+    """A retried POST (same ?req= key as one already answered): answer with the job the first one made."""
+    job = h.app.music.seen(h._query().get("req"))
+    if job is not None:
+        h.send_text(f"J {job.id}\n")
+    return job is not None
+
+
+def _music_new(h: Handler, job) -> None:
+    h.send_text(f"J {h.app.music.remember(h._query().get('req'), job).id}\n")
+
+
 def h_music_gen(h: Handler):
-    """POST /music/gen  body = a description, or a JSON spec ({"style": ...}).  Answers 'J <job>'."""
+    """POST /music/gen[?req=<key>]  body = a description, or a JSON spec ({"style": ...}).  Answers 'J <job>'.
+    Every music POST takes ?req=: a retry with the same key gets the same job instead of a second song."""
+    if _music_again(h):
+        return
     text = _text_body(h)
     if not text:
         h.send_text("E Empty request\n", 400)
@@ -375,8 +398,7 @@ def h_music_gen(h: Handler):
         except ValueError:
             h.send_text("E Bad JSON\n", 400)
             return
-    job = h.app.music.submit(text if spec is None else "", spec)
-    h.send_text(f"J {job.id}\n")
+    _music_new(h, h.app.music.submit(text if spec is None else "", spec))
 
 
 def h_music_job(h: Handler, job_id: str):
@@ -394,11 +416,9 @@ def h_music_job(h: Handler, job_id: str):
         h.stream_line(line)
     deadline = time.time() + 10 * 60
     while job.status not in ("done", "error") and time.time() < deadline:
-        new = h.app.music.wait_change(job, line, timeout=5.0)
-        if new != line:
-            line = new
-            if job.status != "done":
-                h.stream_line(line)
+        line = h.app.music.wait_change(job, line, timeout=5.0)
+        if job.status != "done":                      # also unchanged, every 5 s: DeskMind can tell a quiet
+            h.stream_line(line)                       # job from a dead connection, and reconnect
     if job.status == "done":
         for ln in job.done_lines():                   # every new song (M), then what they replace (R)
             h.stream_line(TX.to_cp437(ln))
@@ -424,6 +444,8 @@ def _music_json(h: Handler, text: str | None = None) -> dict | None:
 def h_music_sketch(h: Handler):
     """POST /music/sketch  body = a description, a JSON spec, or {"like": "<id>"} (style, key and tempo of that
     song): two 8-bar sketches.  Answers 'J <job>'; the job ends with two M lines (Sketch A, Sketch B)."""
+    if _music_again(h):
+        return
     text = _text_body(h)
     spec = _music_json(h, text) if text.lstrip().startswith("{") else None
     request = text if spec is None else ""
@@ -432,14 +454,15 @@ def h_music_sketch(h: Handler):
             h.send_text("E No such song\n", 404)
             return
         request, spec = h.app.music.like(str(spec["like"]))
-    job = h.app.music.submit_sketches(request, spec)
-    h.send_text(f"J {job.id}\n")
+    _music_new(h, h.app.music.submit_sketches(request, spec))
 
 
 def h_music_revise(h: Handler, id_: str):
     """POST /music/<id>/revise  body = JSON {"regenerate": ["lead", "accompaniment", "bass"], "drums": none|light|full,
     "drum_pattern": "next", "tempo": faster|slower|<bpm>, "key": up|down (or "transpose": n), "length"}.
     Answers 'J <job>'; the job ends with 'M <new id> <title>' and 'R <old id>'."""
+    if _music_again(h):
+        return
     id_ = _music_id(h, id_)
     if not id_:
         return
@@ -451,22 +474,26 @@ def h_music_revise(h: Handler, id_: str):
     if not edits:
         h.send_text("E Nothing to change\n", 400)
         return
-    h.send_text(f"J {h.app.music.submit_revise(id_, edits).id}\n")
+    _music_new(h, h.app.music.submit_revise(id_, edits))
 
 
 def h_music_build(h: Handler, id_: str):
     """POST /music/<id>/build (or /keep) [body = a length]: keep this sketch, make it a full song; the
     other sketch goes.  Answers 'J <job>'."""
+    if _music_again(h):
+        return
     id_ = _music_id(h, id_)
     if id_:
-        h.send_text(f"J {h.app.music.submit_build(id_, _text_body(h).strip().lower()).id}\n")
+        _music_new(h, h.app.music.submit_build(id_, _text_body(h).strip().lower()))
 
 
 def h_music_undo(h: Handler, id_: str):
     """POST /music/<id>/undo: back to the revision it was made from.  Answers 'J <job>'."""
+    if _music_again(h):
+        return
     id_ = _music_id(h, id_)
     if id_:
-        h.send_text(f"J {h.app.music.submit_undo(id_).id}\n")
+        _music_new(h, h.app.music.submit_undo(id_))
 
 
 def h_music_info(h: Handler, id_: str):
