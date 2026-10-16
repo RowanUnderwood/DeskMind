@@ -55,3 +55,6 @@ Labtext2midi/out/
 
 # Web search MCP server (helper\mcp: npm ci)
 helper/mcp/node_modules/
+
+# Personal working notes
+Notes.txt
